@@ -12,7 +12,7 @@ import requests
 from langchain_core.tools import tool
 
 _df: pd.DataFrame = None
-_db_path: str = None
+_db_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
 _cleaning_report: list = []
 
 
@@ -152,16 +152,23 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
         except:
             pass
 
-    # 5. Parse date column
-    if "date" in df.columns:
-        try:
-            df["date"] = pd.to_datetime(df["date"], infer_datetime_format=True)
-            df["month"] = df["date"].dt.strftime("%B")
-            df["quarter"] = "Q" + df["date"].dt.quarter.astype(str)
-            df["year"] = df["date"].dt.year
-            changes.append("Parsed date → extracted month, quarter, year")
-        except:
-            pass
+    # 5. Parse date column — try 'date' first, then any date-like column
+    date_parsed = False
+    date_candidates = ["date"] + [c for c in df.columns if c != "date" and
+                                   any(x in c.lower() for x in ["date", "time", "invoice", "order"])]
+    for date_col in date_candidates:
+        if date_col in df.columns and not date_parsed:
+            try:
+                parsed = pd.to_datetime(df[date_col], infer_datetime_format=True, errors="coerce")
+                if parsed.notna().sum() > len(df) * 0.5:
+                    df["date"] = parsed
+                    df["month"] = parsed.dt.strftime("%B")
+                    df["quarter"] = "Q" + parsed.dt.quarter.astype(str)
+                    df["year"] = parsed.dt.year
+                    date_parsed = True
+                    changes.append(f"Parsed '{date_col}' → extracted month, quarter, year")
+            except:
+                pass
 
     # 6. Fill missing numeric values
     numeric_cols = df.select_dtypes(include=[np.number]).columns
@@ -221,7 +228,7 @@ def smart_read_excel(file_buffer) -> pd.DataFrame:
 # MAIN LOAD FUNCTION
 # Called when user uploads any file
 # ─────────────────────────────────────────────
-def load_dataframe(df: pd.DataFrame, db_path: str = "sage_data.db"):
+def load_dataframe(df: pd.DataFrame, db_path: str = None):
     """
     1. Drops empty rows/cols
     2. AI detects column mapping
@@ -230,6 +237,10 @@ def load_dataframe(df: pd.DataFrame, db_path: str = "sage_data.db"):
     Returns list of changes made
     """
     global _df, _db_path, _cleaning_report
+
+    # Always use absolute path so agent.py and tools.py share the same DB
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
 
     # Drop fully empty rows and columns
     df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
