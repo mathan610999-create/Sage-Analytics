@@ -245,15 +245,6 @@ def safe_groupby(df, group_col, val_col, agg="sum"):
         return d.groupby(group_col)[val_col].sum().reset_index()
     return d.groupby(group_col)[val_col].mean().reset_index()
 
-def _content_to_str(content):
-    """Normalise LangChain message content to a plain string."""
-    if isinstance(content, list):
-        return " ".join(
-            c.get("text", "") if isinstance(c, dict) else str(c)
-            for c in content
-        )
-    return str(content) if content is not None else ""
-
 def run_agent(question):
     try:
         config = {"configurable": {"thread_id": st.session_state.thread_id}}
@@ -261,12 +252,13 @@ def run_agent(question):
             {"messages": [{"role": "user", "content": question}]},
             config=config,
         )
+        # Get last message
         messages = result["messages"]
         for msg in reversed(messages):
             if hasattr(msg, 'content') and msg.content:
                 if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
-                    return _content_to_str(msg.content)
-        return _content_to_str(messages[-1].content)
+                    return msg.content
+        return messages[-1].content
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 
@@ -347,15 +339,15 @@ with st.sidebar:
         df_now = get_df()
         st.markdown("**Filters**")
 
-        regions = ["All"] + sorted(df_now["region"].unique().tolist()) \
+        regions = ["All"] + sorted(df_now["region"].dropna().astype(str).unique().tolist()) \
                   if "region" in df_now.columns else ["All"]
         sel_region = st.selectbox("Region", regions)
 
-        categories = ["All"] + sorted(df_now["category"].unique().tolist()) \
+        categories = ["All"] + sorted(df_now["category"].dropna().astype(str).unique().tolist()) \
                      if "category" in df_now.columns else ["All"]
         sel_cat = st.selectbox("Category", categories)
 
-        channels = ["All"] + sorted(df_now["channel"].unique().tolist()) \
+        channels = ["All"] + sorted(df_now["channel"].dropna().astype(str).unique().tolist()) \
                    if "channel" in df_now.columns else ["All"]
         sel_channel = st.selectbox("Channel", channels)
 
@@ -634,60 +626,71 @@ with tab2:
     <div style="font-size:0.88rem;color:#4a8a44;margin-bottom:1rem;padding:0.8rem 1rem;
     background:#f0f7ee;border-radius:8px;border:1px solid #c8dcc4">
     💬 Ask Sage anything about your data in plain English.
-    Type your question in the box at the bottom and press Enter.
+    Type your question below and press Enter.
     </div>""", unsafe_allow_html=True)
 
-    # Process quick action from sidebar first (before rendering)
+    def _content_to_str(content) -> str:
+        """Normalise LangChain content — handles both str and list-of-blocks."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    parts.append(block)
+            return " ".join(parts)
+        return str(content)
+
+    # Reserve the messages area ABOVE the input
+    messages_area = st.container()
+
+    # Process quick action from sidebar
     if st.session_state.get("quick_action"):
         pending = st.session_state.quick_action
         st.session_state.quick_action = None
         st.session_state.messages.append({"role": "user", "content": pending})
         with st.spinner("Sage is thinking..."):
             answer = run_agent(pending)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": _content_to_str(answer)}
+        )
 
-    # Reserve the message area above the chat input
-    messages_area = st.container()
+    # Chat input at the bottom — st.chat_input handles its own state
+    user_input = st.chat_input("Ask Sage about your data...")
 
-    # Chat input — renders at the bottom of the tab
-    user_input = st.chat_input("Ask Sage anything about your data...")
-
-    # Process typed input immediately so it appears in the same render pass
+    # Process typed input — no st.rerun() needed
     if user_input and user_input.strip():
-        q = user_input.strip()
-        st.session_state.messages.append({"role": "user", "content": q})
+        st.session_state.messages.append({"role": "user", "content": user_input.strip()})
         with st.spinner("Sage is thinking..."):
-            answer = run_agent(q)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+            answer = run_agent(user_input.strip())
+        st.session_state.messages.append(
+            {"role": "assistant", "content": _content_to_str(answer)}
+        )
 
-    # Render all messages into the container above the chat input (no rerun needed)
+    # Render all messages into the reserved container
     with messages_area:
         if not st.session_state.messages:
             st.markdown("""
             <div style="text-align:center;padding:2rem 1rem;opacity:0.5">
                 <div style="font-size:2rem;margin-bottom:0.8rem">🌿</div>
                 <div style="font-size:0.88rem;color:#4a8a44">
-                    Click a quick question in the sidebar to get started,<br>or type below
+                    Type a question below or click a quick question in the sidebar
                 </div>
             </div>""", unsafe_allow_html=True)
 
         for msg in st.session_state.messages:
-            # Ensure content is always a plain string
-            raw = msg["content"]
-            if isinstance(raw, list):
-                raw = " ".join(
-                    c.get("text", "") if isinstance(c, dict) else str(c)
-                    for c in raw
-                )
             if msg["role"] == "user":
                 st.markdown(f"""
                 <div class="chat-user">
                     <div class="chat-label user-label">You</div>
-                    {raw}
+                    {_content_to_str(msg["content"])}
                 </div>""", unsafe_allow_html=True)
             else:
+                content = _content_to_str(msg["content"]).replace("\n", "<br>")
                 st.markdown(f"""
                 <div class="chat-agent">
                     <div class="chat-label agent-label">Sage</div>
-                    {raw.replace(chr(10), "<br>")}
+                    {content}
                 </div>""", unsafe_allow_html=True)
