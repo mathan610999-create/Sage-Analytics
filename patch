@@ -1,0 +1,12 @@
+# patch.py - Run this once to fix the discount chart issue
+content = open('D:/sage/app.py', encoding='utf-8').read()
+
+old = '    if "discount_pct" in df.columns and "revenue" in df.columns:'
+new = '    if "discount_pct" in df.columns and "revenue" in df.columns and pd.to_numeric(df["discount_pct"], errors="coerce").notna().any():'
+
+if old in content:
+    content = content.replace(old, new)
+    open('D:/sage/app.py', 'w', encoding='utf-8').write(content)
+    print("Patched successfully!")
+else:
+    print("Pattern not found - already patched or different version")

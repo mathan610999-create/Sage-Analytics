@@ -1,0 +1,5 @@
+.env
+sage_data.db
+__pycache__/
+*.pyc
+sample_sales_data.csv
