@@ -20,6 +20,19 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
 
+# Auto-create sample DB if it doesn't exist (for Streamlit Cloud)
+def ensure_db():
+    if not os.path.exists(DB_PATH):
+        try:
+            import subprocess
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generate_data.py")
+            if os.path.exists(script):
+                subprocess.run(["python", script], cwd=os.path.dirname(os.path.abspath(__file__)))
+        except:
+            pass
+
+ensure_db()
+
 # ─────────────────────────────────────────────
 # TOOLS
 # ─────────────────────────────────────────────
@@ -130,8 +143,9 @@ Your workflow:
 # BUILD AGENT — same pattern as telecom agent
 # ─────────────────────────────────────────────
 def build_agent():
-    # Read key directly from .env file — guaranteed to work
     api_key = None
+
+    # 1. Try reading from .env file (local development)
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     try:
         with open(env_path) as f:
@@ -141,10 +155,22 @@ def build_agent():
                     api_key = line.split("=", 1)[1].strip()
                     break
     except:
+        pass
+
+    # 2. Try environment variable (Streamlit Cloud secrets)
+    if not api_key:
         api_key = os.getenv("ANTHROPIC_API_KEY")
 
+    # 3. Try Streamlit secrets directly
     if not api_key:
-        raise ValueError(f".env file not found or key missing. Looked in: {env_path}")
+        try:
+            import streamlit as st
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except:
+            pass
+
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not found. Add it to .env file or Streamlit secrets.")
 
     llm = ChatAnthropic(
         model="claude-haiku-4-5-20251001",
