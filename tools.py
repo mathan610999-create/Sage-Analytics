@@ -158,7 +158,7 @@ Return ONLY JSON like: {{"Original Col": "standard_name"}}"""
 # ─────────────────────────────────────────────
 def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
     """
-    Cleans the dataframe using AI-detected column mapping.
+    Cleans the dataframe using detected column mapping.
     Returns (cleaned_df, list_of_changes)
     """
     changes = []
@@ -167,13 +167,26 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
     # 1. Strip whitespace from column names
     df.columns = df.columns.str.strip()
 
-    # 2. Apply AI column mapping
+    # 2. Apply column mapping
     if col_mapping:
         df = df.rename(columns=col_mapping)
         for orig, std in col_mapping.items():
             changes.append(f"Renamed '{orig}' → '{std}'")
 
-    # 3. Clean numeric columns — remove $, commas, % signs
+    # 3. Remove header rows mixed into data
+    # (rows where text columns contain column names like "Region", "Product")
+    text_cols = df.select_dtypes(include=["object"]).columns.tolist()
+    col_names_lower = set(df.columns.str.lower().tolist())
+    mask = pd.Series([True] * len(df), index=df.index)
+    for col in text_cols:
+        bad = df[col].astype(str).str.strip().str.lower().isin(col_names_lower)
+        mask = mask & ~bad
+    removed_headers = (~mask).sum()
+    if removed_headers > 0:
+        df = df[mask].reset_index(drop=True)
+        changes.append(f"Removed {removed_headers} header rows mixed into data")
+
+    # 4. Clean numeric columns — remove $, commas, % signs
     for col in df.columns:
         if df[col].dtype == object:
             sample = df[col].dropna().head(10).astype(str)
@@ -188,7 +201,7 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
             except:
                 pass
 
-    # 4. Fix margin_pct — convert decimal to percentage
+    # 5. Fix margin_pct — convert decimal to percentage
     if "margin_pct" in df.columns:
         try:
             numeric_margin = pd.to_numeric(df["margin_pct"], errors="coerce")
@@ -198,7 +211,7 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
         except:
             pass
 
-    # 5. Parse date column — try 'date' first, then any date-like column
+    # 6. Parse date column — try 'date' first, then any date-like column
     date_parsed = False
     date_candidates = ["date"] + [c for c in df.columns if c != "date" and
                                    any(x in c.lower() for x in ["date", "time", "invoice", "order"])]
@@ -216,7 +229,19 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
             except:
                 pass
 
-    # 6. Fill missing numeric values
+    # 7. Derive revenue if missing
+    if "revenue" not in df.columns and "price" in df.columns and "units_sold" in df.columns:
+        df["revenue"] = (pd.to_numeric(df["price"], errors="coerce") *
+                         pd.to_numeric(df["units_sold"], errors="coerce")).round(2)
+        changes.append("Derived 'revenue' from price × units_sold")
+
+    # 8. Derive profit if missing
+    if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
+        df["profit"] = (pd.to_numeric(df["revenue"], errors="coerce") *
+                        pd.to_numeric(df["margin_pct"], errors="coerce") / 100).round(2)
+        changes.append("Derived 'profit' from revenue × margin_pct")
+
+    # 9. Fill missing numeric values
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     null_counts = df[numeric_cols].isnull().sum()
     cols_with_nulls = null_counts[null_counts > 0]
@@ -224,26 +249,16 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
         df[numeric_cols] = df[numeric_cols].fillna(0)
         changes.append(f"Filled missing values in {len(cols_with_nulls)} column(s)")
 
-    # 7. Strip whitespace from text columns
+    # 10. Strip whitespace from text columns
     for col in df.select_dtypes(include=["object"]).columns:
         df[col] = df[col].astype(str).str.strip()
 
-    # 8. Remove fully empty rows
+    # 11. Remove fully empty rows
     before = len(df)
     df = df.dropna(how="all")
     removed = before - len(df)
     if removed > 0:
         changes.append(f"Removed {removed} empty rows")
-
-    # 9. Derive profit if missing
-    if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
-        df["profit"] = (df["revenue"] * df["margin_pct"] / 100).round(2)
-        changes.append("Derived 'profit' from revenue × margin_pct")
-
-    # 10. Derive revenue if missing
-    if "revenue" not in df.columns and "price" in df.columns and "units_sold" in df.columns:
-        df["revenue"] = (df["price"] * df["units_sold"]).round(2)
-        changes.append("Derived 'revenue' from price × units_sold")
 
     return df, changes
 
