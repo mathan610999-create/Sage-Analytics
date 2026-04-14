@@ -267,7 +267,9 @@ def auto_insights(df):
     insights = []
     try:
         if "region" in df.columns and "revenue" in df.columns:
-            reg = pd.to_numeric(df["revenue"], errors="coerce").groupby(df["region"]).sum().sort_values()
+            # Filter out any header-like values
+            valid = df[~df["region"].astype(str).str.lower().isin(["region", "nan", "none", ""])]
+            reg = pd.to_numeric(valid["revenue"], errors="coerce").groupby(valid["region"]).sum().sort_values()
             if len(reg) >= 2 and reg.iloc[-1] > 0:
                 top, bot = reg.index[-1], reg.index[0]
                 gap = round((1 - reg[bot] / reg[top]) * 100)
@@ -584,17 +586,22 @@ with tab1:
     c7, c8 = st.columns(2)
 
     with c7:
-        if "quarter" in df.columns and "revenue" in df.columns:
+        # Use quarter if available, fall back to year or month
+        time_col = "quarter" if "quarter" in df.columns else \
+                   "year" if "year" in df.columns else \
+                   "month" if "month" in df.columns else None
+        if time_col and "revenue" in df.columns:
             df_q = df.copy()
             df_q["revenue"] = pd.to_numeric(df_q["revenue"], errors="coerce").fillna(0)
-            df_q["profit"] = pd.to_numeric(df_q["profit"], errors="coerce").fillna(0)
-            q_df = df_q.groupby("quarter")[["revenue","profit"]].sum().reset_index()
+            df_q["profit"] = pd.to_numeric(df_q.get("profit", pd.Series([0]*len(df_q))), errors="coerce").fillna(0)
+            q_df = df_q.groupby(time_col)[["revenue","profit"]].sum().reset_index()
+            title_label = f"Revenue vs Profit by {time_col.capitalize()}"
             fig = go.Figure()
-            fig.add_bar(x=q_df["quarter"], y=q_df["revenue"],
+            fig.add_bar(x=q_df[time_col], y=q_df["revenue"],
                         name="Revenue", marker_color="#4a8a44")
-            fig.add_bar(x=q_df["quarter"], y=q_df["profit"],
+            fig.add_bar(x=q_df[time_col], y=q_df["profit"],
                         name="Profit", marker_color="#a8d5a2")
-            fig.update_layout(**CHART_THEME, title="Revenue vs Profit by Quarter",
+            fig.update_layout(**CHART_THEME, title=title_label,
                               title_font_size=13, barmode="group", height=280,
                               legend=dict(orientation="h", y=1.1))
             fig.update_xaxes(showgrid=False)
