@@ -235,6 +235,13 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
                          pd.to_numeric(df["units_sold"], errors="coerce")).round(2)
         changes.append("Derived 'revenue' from price × units_sold")
 
+    # Fix quarter format — convert 1,2,3,4 to Q1,Q2,Q3,Q4
+    if "quarter" in df.columns:
+        sample = df["quarter"].dropna().astype(str).head(5).tolist()
+        if all(q in ["1","2","3","4"] for q in sample):
+            df["quarter"] = "Q" + df["quarter"].astype(str)
+            changes.append("Formatted quarter column → Q1, Q2, Q3, Q4")
+
     # 8. Derive profit if missing
     if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
         df["profit"] = (pd.to_numeric(df["revenue"], errors="coerce") *
