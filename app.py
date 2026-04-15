@@ -11,7 +11,7 @@ from plotly.subplots import make_subplots
 import os
 import uuid
 from dotenv import load_dotenv
-from tools import load_dataframe, get_df, smart_read_excel
+from tools import load_dataframe, get_df, smart_read_excel, smart_read_csv
 from agent import build_agent
 
 # Load .env from the same folder as this script
@@ -317,7 +317,7 @@ with st.sidebar:
 
     if uploaded:
         try:
-            df_up = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") \
+            df_up = smart_read_csv(uploaded) if uploaded.name.endswith(".csv") \
                     else smart_read_excel(uploaded)
             changes = load_dataframe(df_up)
             st.session_state.data_loaded  = True
