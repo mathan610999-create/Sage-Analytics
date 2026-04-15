@@ -238,8 +238,9 @@ def fmt_currency(v):
         return "$0"
 
 def safe_groupby(df, group_col, val_col, agg="sum"):
-    """Safe groupby that converts to numeric first"""
-    d = df.copy()
+    """Safe groupby that converts to numeric first and drops NaN group keys."""
+    d = df.dropna(subset=[group_col]).copy()
+    d = d[d[group_col].astype(str).str.strip() != ""]
     d[val_col] = pd.to_numeric(d[val_col], errors='coerce').fillna(0)
     if agg == "sum":
         return d.groupby(group_col)[val_col].sum().reset_index()
@@ -270,26 +271,46 @@ def run_agent(question):
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 
+def _clean_group(df, col):
+    """Return a copy of df with NaN and header-leaked values removed from col."""
+    d = df.dropna(subset=[col]).copy()
+    d = d[d[col].astype(str).str.strip().str.lower() != col.lower()]
+    d = d[d[col].astype(str).str.strip() != ""]
+    return d
+
 def auto_insights(df):
     """Generate 3-5 plain English insights from the data automatically."""
     insights = []
     if "region" in df.columns and "revenue" in df.columns:
-        reg = pd.to_numeric(df["revenue"], errors="coerce").groupby(df["region"]).sum().sort_values()
-        top, bot = reg.index[-1], reg.index[0]
-        gap = round((1 - reg[bot] / reg[top]) * 100)
-        insights.append(f"📍 {top} is your strongest region. {bot} is {gap}% behind — worth investigating.")
+        d = _clean_group(df, "region")
+        if len(d) > 1:
+            reg = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["region"]).sum().sort_values()
+            if len(reg) >= 2 and reg.iloc[-1] > 0:
+                top, bot = reg.index[-1], reg.index[0]
+                gap = round((1 - reg[bot] / reg[top]) * 100)
+                insights.append(f"📍 {top} is your strongest region. {bot} is {gap}% behind — worth investigating.")
     if "category" in df.columns and "revenue" in df.columns:
-        cat = pd.to_numeric(df["revenue"], errors="coerce").groupby(df["category"]).sum().sort_values(ascending=False)
-        insights.append(f"🏆 {cat.index[0]} drives the most revenue ({fmt_currency(cat.iloc[0])}). {cat.index[-1]} is your smallest category.")
+        d = _clean_group(df, "category")
+        if len(d) > 0:
+            cat = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["category"]).sum().sort_values(ascending=False)
+            if len(cat) >= 1:
+                insights.append(f"🏆 {cat.index[0]} drives the most revenue ({fmt_currency(cat.iloc[0])})." +
+                                 (f" {cat.index[-1]} is your smallest category." if len(cat) > 1 else ""))
     if "channel" in df.columns and "revenue" in df.columns:
-        ch = pd.to_numeric(df["revenue"], errors="coerce").groupby(df["channel"]).sum().sort_values(ascending=False)
-        insights.append(f"🛒 {ch.index[0]} channel leads with {fmt_currency(ch.iloc[0])} in revenue.")
-    if "margin_pct" in df.columns:
-        avg_margin = pd.to_numeric(df["margin_pct"], errors='coerce').mean()
-        low = pd.to_numeric(df["margin_pct"], errors="coerce").groupby(df["product"]).mean().sort_values().head(1)
-        insights.append(f"📊 Average margin is {avg_margin:.1f}%. '{low.index[0]}' has the lowest margin at {low.iloc[0]:.1f}%.")
+        d = _clean_group(df, "channel")
+        if len(d) > 0:
+            ch = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["channel"]).sum().sort_values(ascending=False)
+            if len(ch) >= 1:
+                insights.append(f"🛒 {ch.index[0]} channel leads with {fmt_currency(ch.iloc[0])} in revenue.")
+    if "margin_pct" in df.columns and "product" in df.columns:
+        d = _clean_group(df, "product")
+        if len(d) > 0:
+            avg_margin = pd.to_numeric(d["margin_pct"], errors='coerce').mean()
+            low = pd.to_numeric(d["margin_pct"], errors="coerce").groupby(d["product"]).mean().sort_values().head(1)
+            if len(low) > 0 and not pd.isna(avg_margin):
+                insights.append(f"📊 Average margin is {avg_margin:.1f}%. '{low.index[0]}' has the lowest margin at {low.iloc[0]:.1f}%.")
     if "discount_pct" in df.columns and "revenue" in df.columns:
-        heavy_disc = df[df["discount_pct"] >= 15]
+        heavy_disc = df[pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0) >= 15]
         if len(heavy_disc) > 0:
             pct = round(len(heavy_disc) / len(df) * 100)
             insights.append(f"💡 {pct}% of orders use discounts of 15%+. Consider if this is intentional strategy.")
