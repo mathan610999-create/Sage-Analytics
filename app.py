@@ -11,7 +11,7 @@ from plotly.subplots import make_subplots
 import os
 import uuid
 from dotenv import load_dotenv
-from tools import load_dataframe, get_df, smart_read_excel, smart_read_csv
+from tools import load_dataframe, get_df, smart_read_excel
 from agent import build_agent
 
 # Load .env from the same folder as this script
@@ -238,12 +238,23 @@ def fmt_currency(v):
         return "$0"
 
 def safe_groupby(df, group_col, val_col, agg="sum"):
-    """Safe groupby that converts to numeric first"""
-    d = df.copy()
+    """Safe groupby that converts to numeric first and drops NaN/header-leaked group keys."""
+    d = df.dropna(subset=[group_col]).copy()
+    d = d[d[group_col].astype(str).str.strip() != ""]
+    d = d[d[group_col].astype(str).str.strip().str.lower() != group_col.lower()]
     d[val_col] = pd.to_numeric(d[val_col], errors='coerce').fillna(0)
     if agg == "sum":
         return d.groupby(group_col)[val_col].sum().reset_index()
     return d.groupby(group_col)[val_col].mean().reset_index()
+
+def _content_to_str(content):
+    """Normalise LangChain message content to a plain string."""
+    if isinstance(content, list):
+        return " ".join(
+            c.get("text", "") if isinstance(c, dict) else str(c)
+            for c in content
+        )
+    return str(content) if content is not None else ""
 
 def run_agent(question):
     try:
@@ -252,57 +263,58 @@ def run_agent(question):
             {"messages": [{"role": "user", "content": question}]},
             config=config,
         )
-        # Get last message
         messages = result["messages"]
         for msg in reversed(messages):
             if hasattr(msg, 'content') and msg.content:
                 if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
-                    return msg.content
-        return messages[-1].content
+                    return _content_to_str(msg.content)
+        return _content_to_str(messages[-1].content)
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
+
+def _clean_group(df, col):
+    """Return a copy of df with NaN and header-leaked values removed from col."""
+    d = df.dropna(subset=[col]).copy()
+    d = d[d[col].astype(str).str.strip().str.lower() != col.lower()]
+    d = d[d[col].astype(str).str.strip() != ""]
+    return d
 
 def auto_insights(df):
     """Generate 3-5 plain English insights from the data automatically."""
     insights = []
-    try:
-        if "region" in df.columns and "revenue" in df.columns:
-            # Filter out any header-like values
-            valid = df[~df["region"].astype(str).str.lower().isin(["region", "nan", "none", ""])]
-            reg = pd.to_numeric(valid["revenue"], errors="coerce").groupby(valid["region"]).sum().sort_values()
+    if "region" in df.columns and "revenue" in df.columns:
+        d = _clean_group(df, "region")
+        if len(d) > 1:
+            reg = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["region"]).sum().sort_values()
             if len(reg) >= 2 and reg.iloc[-1] > 0:
                 top, bot = reg.index[-1], reg.index[0]
                 gap = round((1 - reg[bot] / reg[top]) * 100)
                 insights.append(f"📍 {top} is your strongest region. {bot} is {gap}% behind — worth investigating.")
-    except: pass
-    try:
-        if "category" in df.columns and "revenue" in df.columns:
-            cat = pd.to_numeric(df["revenue"], errors="coerce").groupby(df["category"]).sum().sort_values(ascending=False)
-            if len(cat) >= 2:
-                insights.append(f"🏆 {cat.index[0]} drives the most revenue ({fmt_currency(cat.iloc[0])}). {cat.index[-1]} is your smallest category.")
-    except: pass
-    try:
-        if "channel" in df.columns and "revenue" in df.columns:
-            ch = pd.to_numeric(df["revenue"], errors="coerce").groupby(df["channel"]).sum().sort_values(ascending=False)
+    if "category" in df.columns and "revenue" in df.columns:
+        d = _clean_group(df, "category")
+        if len(d) > 0:
+            cat = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["category"]).sum().sort_values(ascending=False)
+            if len(cat) >= 1:
+                insights.append(f"🏆 {cat.index[0]} drives the most revenue ({fmt_currency(cat.iloc[0])})." +
+                                 (f" {cat.index[-1]} is your smallest category." if len(cat) > 1 else ""))
+    if "channel" in df.columns and "revenue" in df.columns:
+        d = _clean_group(df, "channel")
+        if len(d) > 0:
+            ch = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["channel"]).sum().sort_values(ascending=False)
             if len(ch) >= 1:
                 insights.append(f"🛒 {ch.index[0]} channel leads with {fmt_currency(ch.iloc[0])} in revenue.")
-    except: pass
-    try:
-        if "margin_pct" in df.columns:
-            avg_margin = pd.to_numeric(df["margin_pct"], errors='coerce').mean()
-            if "product" in df.columns:
-                low = pd.to_numeric(df["margin_pct"], errors="coerce").groupby(df["product"]).mean().sort_values().head(1)
-                if len(low) > 0:
-                    insights.append(f"📊 Average margin is {avg_margin:.1f}%. '{low.index[0]}' has the lowest margin at {low.iloc[0]:.1f}%.")
-    except: pass
-    try:
-        if "discount_pct" in df.columns and "revenue" in df.columns:
-            disc = pd.to_numeric(df["discount_pct"], errors="coerce")
-            heavy_disc = disc[disc >= 15]
-            if len(heavy_disc) > 0:
-                pct = round(len(heavy_disc) / len(df) * 100)
-                insights.append(f"💡 {pct}% of orders use discounts of 15%+. Consider if this is intentional strategy.")
-    except: pass
+    if "margin_pct" in df.columns and "product" in df.columns:
+        d = _clean_group(df, "product")
+        if len(d) > 0:
+            avg_margin = pd.to_numeric(d["margin_pct"], errors='coerce').mean()
+            low = pd.to_numeric(d["margin_pct"], errors="coerce").groupby(d["product"]).mean().sort_values().head(1)
+            if len(low) > 0 and not pd.isna(avg_margin):
+                insights.append(f"📊 Average margin is {avg_margin:.1f}%. '{low.index[0]}' has the lowest margin at {low.iloc[0]:.1f}%.")
+    if "discount_pct" in df.columns and "revenue" in df.columns:
+        heavy_disc = df[pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0) >= 15]
+        if len(heavy_disc) > 0:
+            pct = round(len(heavy_disc) / len(df) * 100)
+            insights.append(f"💡 {pct}% of orders use discounts of 15%+. Consider if this is intentional strategy.")
     return insights
 
 
@@ -317,7 +329,7 @@ with st.sidebar:
 
     if uploaded:
         try:
-            df_up = smart_read_csv(uploaded) if uploaded.name.endswith(".csv") \
+            df_up = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") \
                     else smart_read_excel(uploaded)
             changes = load_dataframe(df_up)
             st.session_state.data_loaded  = True
@@ -357,15 +369,15 @@ with st.sidebar:
         df_now = get_df()
         st.markdown("**Filters**")
 
-        regions = ["All"] + sorted(df_now["region"].dropna().astype(str).unique().tolist()) \
+        regions = ["All"] + sorted(df_now["region"].dropna().unique().tolist()) \
                   if "region" in df_now.columns else ["All"]
         sel_region = st.selectbox("Region", regions)
 
-        categories = ["All"] + sorted(df_now["category"].dropna().astype(str).unique().tolist()) \
+        categories = ["All"] + sorted(df_now["category"].dropna().unique().tolist()) \
                      if "category" in df_now.columns else ["All"]
         sel_cat = st.selectbox("Category", categories)
 
-        channels = ["All"] + sorted(df_now["channel"].dropna().astype(str).unique().tolist()) \
+        channels = ["All"] + sorted(df_now["channel"].dropna().unique().tolist()) \
                    if "channel" in df_now.columns else ["All"]
         sel_channel = st.selectbox("Channel", channels)
 
@@ -586,27 +598,17 @@ with tab1:
     c7, c8 = st.columns(2)
 
     with c7:
-        # Use quarter if available, fall back to year or month
-        time_col = "quarter" if "quarter" in df.columns else \
-                   "year" if "year" in df.columns else \
-                   "month" if "month" in df.columns else None
-        if time_col and "revenue" in df.columns:
+        if "quarter" in df.columns and "revenue" in df.columns:
             df_q = df.copy()
             df_q["revenue"] = pd.to_numeric(df_q["revenue"], errors="coerce").fillna(0)
-            has_profit = "profit" in df_q.columns
-            if has_profit:
-                df_q["profit"] = pd.to_numeric(df_q["profit"], errors="coerce").fillna(0)
-                q_df = df_q.groupby(time_col)[["revenue","profit"]].sum().reset_index()
-            else:
-                q_df = df_q.groupby(time_col)[["revenue"]].sum().reset_index()
-            title_label = f"Revenue by {time_col.capitalize()}"
+            df_q["profit"] = pd.to_numeric(df_q["profit"], errors="coerce").fillna(0)
+            q_df = df_q.groupby("quarter")[["revenue","profit"]].sum().reset_index()
             fig = go.Figure()
-            fig.add_bar(x=q_df[time_col], y=q_df["revenue"],
+            fig.add_bar(x=q_df["quarter"], y=q_df["revenue"],
                         name="Revenue", marker_color="#4a8a44")
-            if has_profit:
-                fig.add_bar(x=q_df[time_col], y=q_df["profit"],
-                            name="Profit", marker_color="#a8d5a2")
-            fig.update_layout(**CHART_THEME, title=title_label,
+            fig.add_bar(x=q_df["quarter"], y=q_df["profit"],
+                        name="Profit", marker_color="#a8d5a2")
+            fig.update_layout(**CHART_THEME, title="Revenue vs Profit by Quarter",
                               title_font_size=13, barmode="group", height=280,
                               legend=dict(orientation="h", y=1.1))
             fig.update_xaxes(showgrid=False)
@@ -654,71 +656,60 @@ with tab2:
     <div style="font-size:0.88rem;color:#4a8a44;margin-bottom:1rem;padding:0.8rem 1rem;
     background:#f0f7ee;border-radius:8px;border:1px solid #c8dcc4">
     💬 Ask Sage anything about your data in plain English.
-    Type your question below and press Enter.
+    Type your question in the box at the bottom and press Enter.
     </div>""", unsafe_allow_html=True)
 
-    def _content_to_str(content) -> str:
-        """Normalise LangChain content — handles both str and list-of-blocks."""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-                elif isinstance(block, str):
-                    parts.append(block)
-            return " ".join(parts)
-        return str(content)
-
-    # Reserve the messages area ABOVE the input
-    messages_area = st.container()
-
-    # Process quick action from sidebar
+    # Process quick action from sidebar first (before rendering)
     if st.session_state.get("quick_action"):
         pending = st.session_state.quick_action
         st.session_state.quick_action = None
         st.session_state.messages.append({"role": "user", "content": pending})
         with st.spinner("Sage is thinking..."):
             answer = run_agent(pending)
-        st.session_state.messages.append(
-            {"role": "assistant", "content": _content_to_str(answer)}
-        )
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
-    # Chat input at the bottom — st.chat_input handles its own state
-    user_input = st.chat_input("Ask Sage about your data...")
+    # Reserve the message area above the chat input
+    messages_area = st.container()
 
-    # Process typed input — no st.rerun() needed
+    # Chat input — renders at the bottom of the tab
+    user_input = st.chat_input("Ask Sage anything about your data...")
+
+    # Process typed input immediately so it appears in the same render pass
     if user_input and user_input.strip():
-        st.session_state.messages.append({"role": "user", "content": user_input.strip()})
+        q = user_input.strip()
+        st.session_state.messages.append({"role": "user", "content": q})
         with st.spinner("Sage is thinking..."):
-            answer = run_agent(user_input.strip())
-        st.session_state.messages.append(
-            {"role": "assistant", "content": _content_to_str(answer)}
-        )
+            answer = run_agent(q)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
-    # Render all messages into the reserved container
+    # Render all messages into the container above the chat input (no rerun needed)
     with messages_area:
         if not st.session_state.messages:
             st.markdown("""
             <div style="text-align:center;padding:2rem 1rem;opacity:0.5">
                 <div style="font-size:2rem;margin-bottom:0.8rem">🌿</div>
                 <div style="font-size:0.88rem;color:#4a8a44">
-                    Type a question below or click a quick question in the sidebar
+                    Click a quick question in the sidebar to get started,<br>or type below
                 </div>
             </div>""", unsafe_allow_html=True)
 
         for msg in st.session_state.messages:
+            # Ensure content is always a plain string
+            raw = msg["content"]
+            if isinstance(raw, list):
+                raw = " ".join(
+                    c.get("text", "") if isinstance(c, dict) else str(c)
+                    for c in raw
+                )
             if msg["role"] == "user":
                 st.markdown(f"""
                 <div class="chat-user">
                     <div class="chat-label user-label">You</div>
-                    {_content_to_str(msg["content"])}
+                    {raw}
                 </div>""", unsafe_allow_html=True)
             else:
-                content = _content_to_str(msg["content"]).replace("\n", "<br>")
                 st.markdown(f"""
                 <div class="chat-agent">
                     <div class="chat-label agent-label">Sage</div>
-                    {content}
+                    {raw.replace(chr(10), "<br>")}
                 </div>""", unsafe_allow_html=True)
