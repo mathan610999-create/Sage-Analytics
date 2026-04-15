@@ -297,26 +297,28 @@ def smart_read_csv(file_buffer) -> pd.DataFrame:
     Reads CSV file — handles files where first column is unnamed index
     and real headers are in the first data row.
     """
-    df = pd.read_csv(file_buffer)
-
-    # Check if columns are all Unnamed — means real headers are in row 0
-    unnamed_count = sum(1 for c in df.columns if str(c).startswith("Unnamed:"))
-    if unnamed_count > len(df.columns) * 0.5:
-        # Real headers are in first row — re-read with header from row 0
+    try:
         file_buffer.seek(0)
-        df = pd.read_csv(file_buffer, header=None)
-        # Find the actual header row
-        for i in range(min(5, len(df))):
-            row = df.iloc[i].astype(str)
-            non_null = (row.str.lower() != 'nan').sum()
-            if non_null >= max(3, len(df.columns) * 0.5):
-                # Use this row as header
-                df.columns = df.iloc[i].astype(str).str.strip()
-                df = df.iloc[i+1:].reset_index(drop=True)
-                break
+        df = pd.read_csv(file_buffer)
 
-    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-    return df
+        # Check if columns are all Unnamed — means real headers are in row 0
+        unnamed_count = sum(1 for c in df.columns if str(c).startswith("Unnamed:"))
+        if unnamed_count > len(df.columns) * 0.5:
+            file_buffer.seek(0)
+            raw = pd.read_csv(file_buffer, header=None)
+            for i in range(min(5, len(raw))):
+                row = raw.iloc[i].astype(str)
+                non_null = (row.str.lower() != 'nan').sum()
+                if non_null >= max(3, len(raw.columns) * 0.5):
+                    raw.columns = raw.iloc[i].astype(str).str.strip()
+                    raw = raw.iloc[i+1:].reset_index(drop=True)
+                    df = raw
+                    break
+
+        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        return df
+    except Exception as e:
+        raise Exception(f"Could not read CSV: {str(e)}")
 
 
 # ─────────────────────────────────────────────
