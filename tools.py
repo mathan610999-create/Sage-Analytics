@@ -42,69 +42,115 @@ STANDARD_COLUMNS = {
 
 def ai_detect_columns(df: pd.DataFrame) -> dict:
     """
-    Uses Claude API to intelligently map any column names
-    to standard names. Works on ANY dataset regardless of
-    how columns are named.
-    Returns: {original_col: standard_col}
+    Maps column names to standard names.
+    First tries rule-based matching, then AI for anything remaining.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {}
+    mapping = {}
 
-    # Build a sample of the data to send to Claude
-    sample_data = {}
-    for col in df.columns:
-        sample_vals = df[col].dropna().head(3).tolist()
-        sample_data[col] = sample_vals
+    # Rule-based mapping first — no API needed
+    RULES = {
+        "revenue":      ["total sales", "totalsales", "gross sales", "gross_sales",
+                         "net sales", "net_sales", "revenue", "sales", "amount",
+                         "total revenue", "total_revenue", "turnover"],
+        "profit":       ["operating profit", "operating_profit", "net profit",
+                         "net_profit", "gross profit", "gross_profit", "profit",
+                         "earnings", "operating income", "ebit"],
+        "units_sold":   ["units sold", "units_sold", "quantity", "qty", "volume",
+                         "units", "items sold", "items_sold", "pieces"],
+        "margin_pct":   ["operating margin", "operating_margin", "margin",
+                         "profit margin", "profit_margin", "margin %",
+                         "gross margin", "net margin", "margin_pct"],
+        "region":       ["region", "area", "territory", "zone", "market",
+                         "geography", "geographic region"],
+        "category":     ["category", "product category", "product_category",
+                         "type", "segment", "division", "department"],
+        "product":      ["product", "product name", "product_name", "item",
+                         "sku", "description", "goods"],
+        "channel":      ["channel", "sales method", "sales_method",
+                         "sales channel", "method", "medium", "retailer type"],
+        "date":         ["date", "invoice date", "invoice_date", "order date",
+                         "order_date", "transaction date", "sale date", "sale_date"],
+        "retailer":     ["retailer", "retailer name", "store", "vendor",
+                         "seller", "merchant", "account"],
+        "price":        ["price per unit", "price_per_unit", "unit price",
+                         "unit_price", "price", "selling price", "rate"],
+        "state":        ["state", "province", "state_province"],
+        "city":         ["city", "town"],
+        "discount_pct": ["discount", "discount %", "discount_pct",
+                         "markdown", "promo"],
+    }
 
-    standard_desc = "\n".join([f"- {k}: {v}" for k, v in STANDARD_COLUMNS.items()])
+    used_standards = set()
+    col_lower = {col.lower().strip(): col for col in df.columns}
 
-    prompt = f"""You are a data analyst. I have a dataset with these columns and sample values:
+    for standard, aliases in RULES.items():
+        if standard in used_standards:
+            continue
+        for alias in aliases:
+            if alias in col_lower and standard not in used_standards:
+                original = col_lower[alias]
+                if original not in mapping:
+                    mapping[original] = standard
+                    used_standards.add(standard)
+                    break
 
-{json.dumps(sample_data, indent=2, default=str)}
+    # AI detection for any columns not yet mapped
+    unmapped_cols = [c for c in df.columns if c not in mapping]
+    if unmapped_cols and len(used_standards) < len(RULES):
+        # Try to get API key from multiple sources
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            try:
+                import streamlit as st
+                api_key = st.secrets.get("ANTHROPIC_API_KEY")
+            except:
+                pass
 
-Map each column to ONE of these standard names if it matches:
-{standard_desc}
+        if api_key:
+            sample_data = {}
+            for col in unmapped_cols[:10]:
+                sample_data[col] = df[col].dropna().head(3).tolist()
 
-Rules:
-- Only map if you are confident the column represents that concept
-- Do not map columns that don't match any standard name
-- Each standard name can only be used ONCE (pick the best match)
-- Return ONLY a JSON object like: {{"original_col": "standard_col", ...}}
-- Do not include any explanation, only the JSON
+            remaining_standards = {k: v for k, v in STANDARD_COLUMNS.items()
+                                   if k not in used_standards}
+            if remaining_standards and sample_data:
+                standard_desc = "\n".join([f"- {k}: {v}"
+                                          for k, v in remaining_standards.items()])
+                prompt = f"""Map these columns to standard names if they match:
+Columns: {json.dumps(sample_data, indent=2, default=str)}
+Standards: {standard_desc}
+Return ONLY JSON like: {{"Original Col": "standard_name"}}"""
 
-Example output:
-{{"Total Sales": "revenue", "Operating Profit": "profit", "Units Sold": "units_sold"}}"""
+                try:
+                    response = requests.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": "claude-haiku-4-5-20251001",
+                            "max_tokens": 300,
+                            "messages": [{"role": "user", "content": prompt}]
+                        },
+                        timeout=10
+                    )
+                    if response.status_code == 200:
+                        text = response.json()["content"][0]["text"].strip()
+                        text = text.replace("```json", "").replace("```", "").strip()
+                        ai_map = json.loads(text)
+                        for k, v in ai_map.items():
+                            if k in df.columns and v in STANDARD_COLUMNS and k not in mapping:
+                                mapping[k] = v
+                except:
+                    pass
 
-    try:
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 500,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=15
-        )
+    return mapping
 
-        if response.status_code == 200:
-            text = response.json()["content"][0]["text"].strip()
-            # Clean up response — remove markdown if present
-            text = text.replace("```json", "").replace("```", "").strip()
-            mapping = json.loads(text)
-            # Validate — only keep mappings where original col exists
-            valid = {k: v for k, v in mapping.items()
-                     if k in df.columns and v in STANDARD_COLUMNS}
-            return valid
-    except Exception as e:
-        print(f"AI column detection failed: {e}")
 
-    return {}
+
+
 
 
 # ─────────────────────────────────────────────
@@ -112,7 +158,7 @@ Example output:
 # ─────────────────────────────────────────────
 def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
     """
-    Cleans the dataframe using AI-detected column mapping.
+    Cleans the dataframe using detected column mapping.
     Returns (cleaned_df, list_of_changes)
     """
     changes = []
@@ -121,13 +167,26 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
     # 1. Strip whitespace from column names
     df.columns = df.columns.str.strip()
 
-    # 2. Apply AI column mapping
+    # 2. Apply column mapping
     if col_mapping:
         df = df.rename(columns=col_mapping)
         for orig, std in col_mapping.items():
             changes.append(f"Renamed '{orig}' → '{std}'")
 
-    # 3. Clean numeric columns — remove $, commas, % signs
+    # 3. Remove header rows mixed into data
+    # (rows where text columns contain column names like "Region", "Product")
+    text_cols = df.select_dtypes(include=["object"]).columns.tolist()
+    col_names_lower = set(df.columns.str.lower().tolist())
+    mask = pd.Series([True] * len(df), index=df.index)
+    for col in text_cols:
+        bad = df[col].astype(str).str.strip().str.lower().isin(col_names_lower)
+        mask = mask & ~bad
+    removed_headers = (~mask).sum()
+    if removed_headers > 0:
+        df = df[mask].reset_index(drop=True)
+        changes.append(f"Removed {removed_headers} header rows mixed into data")
+
+    # 4. Clean numeric columns — remove $, commas, % signs
     for col in df.columns:
         if df[col].dtype == object:
             sample = df[col].dropna().head(10).astype(str)
@@ -142,7 +201,7 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
             except:
                 pass
 
-    # 4. Fix margin_pct — convert decimal to percentage
+    # 5. Fix margin_pct — convert decimal to percentage
     if "margin_pct" in df.columns:
         try:
             numeric_margin = pd.to_numeric(df["margin_pct"], errors="coerce")
@@ -152,18 +211,37 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
         except:
             pass
 
-    # 5. Parse date column
-    if "date" in df.columns:
-        try:
-            df["date"] = pd.to_datetime(df["date"], infer_datetime_format=True)
-            df["month"] = df["date"].dt.strftime("%B")
-            df["quarter"] = "Q" + df["date"].dt.quarter.astype(str)
-            df["year"] = df["date"].dt.year
-            changes.append("Parsed date → extracted month, quarter, year")
-        except:
-            pass
+    # 6. Parse date column — try 'date' first, then any date-like column
+    date_parsed = False
+    date_candidates = ["date"] + [c for c in df.columns if c != "date" and
+                                   any(x in c.lower() for x in ["date", "time", "invoice", "order"])]
+    for date_col in date_candidates:
+        if date_col in df.columns and not date_parsed:
+            try:
+                parsed = pd.to_datetime(df[date_col], infer_datetime_format=True, errors="coerce")
+                if parsed.notna().sum() > len(df) * 0.5:
+                    df["date"] = parsed
+                    df["month"] = parsed.dt.strftime("%B")
+                    df["quarter"] = "Q" + parsed.dt.quarter.astype(str)
+                    df["year"] = parsed.dt.year
+                    date_parsed = True
+                    changes.append(f"Parsed '{date_col}' → extracted month, quarter, year")
+            except:
+                pass
 
-    # 6. Fill missing numeric values
+    # 7. Derive revenue if missing
+    if "revenue" not in df.columns and "price" in df.columns and "units_sold" in df.columns:
+        df["revenue"] = (pd.to_numeric(df["price"], errors="coerce") *
+                         pd.to_numeric(df["units_sold"], errors="coerce")).round(2)
+        changes.append("Derived 'revenue' from price × units_sold")
+
+    # 8. Derive profit if missing
+    if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
+        df["profit"] = (pd.to_numeric(df["revenue"], errors="coerce") *
+                        pd.to_numeric(df["margin_pct"], errors="coerce") / 100).round(2)
+        changes.append("Derived 'profit' from revenue × margin_pct")
+
+    # 9. Fill missing numeric values
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     null_counts = df[numeric_cols].isnull().sum()
     cols_with_nulls = null_counts[null_counts > 0]
@@ -171,26 +249,16 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
         df[numeric_cols] = df[numeric_cols].fillna(0)
         changes.append(f"Filled missing values in {len(cols_with_nulls)} column(s)")
 
-    # 7. Strip whitespace from text columns
+    # 10. Strip whitespace from text columns
     for col in df.select_dtypes(include=["object"]).columns:
         df[col] = df[col].astype(str).str.strip()
 
-    # 8. Remove fully empty rows
+    # 11. Remove fully empty rows
     before = len(df)
     df = df.dropna(how="all")
     removed = before - len(df)
     if removed > 0:
         changes.append(f"Removed {removed} empty rows")
-
-    # 9. Derive profit if missing
-    if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
-        df["profit"] = (df["revenue"] * df["margin_pct"] / 100).round(2)
-        changes.append("Derived 'profit' from revenue × margin_pct")
-
-    # 10. Derive revenue if missing
-    if "revenue" not in df.columns and "price" in df.columns and "units_sold" in df.columns:
-        df["revenue"] = (df["price"] * df["units_sold"]).round(2)
-        changes.append("Derived 'revenue' from price × units_sold")
 
     return df, changes
 
@@ -213,6 +281,33 @@ def smart_read_excel(file_buffer) -> pd.DataFrame:
 
     file_buffer.seek(0)
     df = pd.read_excel(file_buffer, header=header_row)
+    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+    return df
+
+
+def smart_read_csv(file_buffer) -> pd.DataFrame:
+    """
+    Reads CSV file — handles files where first column is unnamed index
+    and real headers are in the first data row.
+    """
+    df = pd.read_csv(file_buffer)
+
+    # Check if columns are all Unnamed — means real headers are in row 0
+    unnamed_count = sum(1 for c in df.columns if str(c).startswith("Unnamed:"))
+    if unnamed_count > len(df.columns) * 0.5:
+        # Real headers are in first row — re-read with header from row 0
+        file_buffer.seek(0)
+        df = pd.read_csv(file_buffer, header=None)
+        # Find the actual header row
+        for i in range(min(5, len(df))):
+            row = df.iloc[i].astype(str)
+            non_null = (row.str.lower() != 'nan').sum()
+            if non_null >= max(3, len(df.columns) * 0.5):
+                # Use this row as header
+                df.columns = df.iloc[i].astype(str).str.strip()
+                df = df.iloc[i+1:].reset_index(drop=True)
+                break
+
     df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
     return df
 
