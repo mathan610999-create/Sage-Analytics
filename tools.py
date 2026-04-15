@@ -1,551 +1,749 @@
 """
-tools.py - All agent tools for Sage
-AI-powered column detection + smart data cleaning for any uploaded file
+app.py - Sage Streamlit UI (Phase 2 — Dashboard + Chat)
+Two tabs: full visual dashboard + AI chat interface
 """
 
+import streamlit as st
 import pandas as pd
-import numpy as np
-import sqlite3
-import json
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
-import requests
-from langchain_core.tools import tool
+import uuid
+from dotenv import load_dotenv
+from tools import load_dataframe, get_df, smart_read_excel, get_unmapped_columns, get_raw_df
+from agent import build_agent
 
-_df: pd.DataFrame = None
-_db_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
-_cleaning_report: list = []
+# Load .env from the same folder as this script
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
+st.set_page_config(
+    page_title="Sage — Wise advice from your data",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# ─────────────────────────────────────────────
-# AI COLUMN DETECTOR
-# Uses Claude to intelligently map any column
-# names to standard names — works on ANY dataset
-# ─────────────────────────────────────────────
-STANDARD_COLUMNS = {
-    "revenue":      "Total monetary value of sales (e.g. Total Sales, Gross Revenue, Amount)",
-    "profit":       "Net earnings after costs (e.g. Operating Profit, Net Income, Earnings)",
-    "units_sold":   "Number of items sold (e.g. Quantity, Units, Volume, Pieces)",
-    "margin_pct":   "Profit as percentage of revenue (e.g. Operating Margin, Gross Margin %)",
-    "region":       "Geographic area (e.g. Territory, Zone, Area, Market)",
-    "category":     "Product group (e.g. Product Category, Type, Segment, Department)",
-    "product":      "Product name or description (e.g. Item, SKU, Product Name)",
-    "channel":      "Sales method or distribution (e.g. Sales Method, Retailer Type, Medium)",
-    "date":         "Transaction date (e.g. Invoice Date, Order Date, Sale Date)",
-    "retailer":     "Store or seller name (e.g. Retailer, Store, Vendor, Account)",
-    "price":        "Unit selling price (e.g. Price per Unit, Unit Price, Rate)",
-    "discount_pct": "Discount percentage applied (e.g. Discount %, Markdown, Promotion)",
-    "state":        "State or province location",
-    "city":         "City location",
-    "customer":     "Customer name or ID",
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+    background-color: #f7f5f0;
+    color: #1a1a1a;
+}
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 1.2rem; max-width: 1200px; }
+
+.sage-header {
+    background: #1a2e1a;
+    border-radius: 12px;
+    padding: 1.2rem 2rem;
+    margin-bottom: 1.2rem;
+}
+.sage-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.6rem;
+    color: #a8d5a2;
+    margin: 0;
+}
+.sage-subtitle {
+    font-size: 0.78rem;
+    color: #6a9e64;
+    margin-top: 0.2rem;
+    letter-spacing: 0.5px;
 }
 
+.kpi-card {
+    background: #ffffff;
+    border: 1px solid #e0e8e0;
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+.kpi-value {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.5rem;
+    color: #1a2e1a;
+    line-height: 1.2;
+}
+.kpi-label {
+    font-size: 0.68rem;
+    color: #6a9e64;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 0.2rem;
+}
+.kpi-delta {
+    font-size: 0.75rem;
+    margin-top: 0.2rem;
+}
 
-def ai_detect_columns(df: pd.DataFrame) -> dict:
-    """
-    Maps column names to standard names.
-    First tries rule-based matching, then AI for anything remaining.
-    """
-    mapping = {}
+.section-header {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    color: #1a2e1a;
+    margin: 1rem 0 0.5rem 0;
+    padding-bottom: 0.3rem;
+    border-bottom: 2px solid #c8e0c4;
+}
 
-    # Rule-based mapping first — no API needed
-    RULES = {
-        "revenue":      ["total sales", "totalsales", "gross sales", "gross_sales",
-                         "net sales", "net_sales", "revenue", "sales", "amount",
-                         "total revenue", "total_revenue", "turnover"],
-        "profit":       ["operating profit", "operating_profit", "net profit",
-                         "net_profit", "gross profit", "gross_profit", "profit",
-                         "earnings", "operating income", "ebit"],
-        "units_sold":   ["units sold", "units_sold", "quantity", "qty", "volume",
-                         "units", "items sold", "items_sold", "pieces"],
-        "margin_pct":   ["operating margin", "operating_margin", "margin",
-                         "profit margin", "profit_margin", "margin %",
-                         "gross margin", "net margin", "margin_pct"],
-        "region":       ["region", "area", "territory", "zone", "market",
-                         "geography", "geographic region"],
-        "category":     ["category", "product category", "product_category",
-                         "type", "segment", "division", "department"],
-        "product":      ["product", "product name", "product_name", "item",
-                         "sku", "description", "goods"],
-        "channel":      ["channel", "sales method", "sales_method",
-                         "sales channel", "method", "medium", "retailer type"],
-        "date":         ["date", "invoice date", "invoice_date", "order date",
-                         "order_date", "transaction date", "sale date", "sale_date"],
-        "retailer":     ["retailer", "retailer name", "store", "vendor",
-                         "seller", "merchant", "account"],
-        "price":        ["price per unit", "price_per_unit", "unit price",
-                         "unit_price", "price", "selling price", "rate"],
-        "state":        ["state", "province", "state_province"],
-        "city":         ["city", "town"],
-        "discount_pct": ["discount", "discount %", "discount_pct",
-                         "markdown", "promo"],
-    }
+.chat-user {
+    background: #e8f0e8;
+    border-radius: 12px 12px 4px 12px;
+    padding: 0.9rem 1.2rem;
+    margin: 0.5rem 0 0.5rem 20%;
+    font-size: 0.9rem;
+    color: #1a2e1a;
+    border: 1px solid #c8d8c8;
+}
+.chat-agent {
+    background: #ffffff;
+    border-radius: 4px 12px 12px 12px;
+    padding: 1rem 1.2rem;
+    margin: 0.5rem 20% 0.5rem 0;
+    font-size: 0.9rem;
+    color: #1a1a1a;
+    border: 1px solid #e0e8e0;
+    border-left: 3px solid #4a8a44;
+    line-height: 1.7;
+}
+.chat-label {
+    font-size: 0.62rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+    font-weight: 500;
+}
+.user-label { color: #4a8a44; }
+.agent-label { color: #2d5e2d; }
 
-    used_standards = set()
-    col_lower = {col.lower().strip(): col for col in df.columns}
+.stButton > button {
+    background: #1a2e1a !important;
+    color: #a8d5a2 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 0.78rem !important;
+    padding: 0.4rem 0.8rem !important;
+    width: 100% !important;
+    text-align: left !important;
+}
+.stButton > button:hover {
+    background: #2d5e2d !important;
+}
 
-    for standard, aliases in RULES.items():
-        if standard in used_standards:
-            continue
-        for alias in aliases:
-            if alias in col_lower and standard not in used_standards:
-                original = col_lower[alias]
-                if original not in mapping:
-                    mapping[original] = standard
-                    used_standards.add(standard)
-                    break
+section[data-testid="stSidebar"] {
+    background: #f0ede6 !important;
+    border-right: 1px solid #ddd8cc !important;
+}
 
-    # AI detection for any columns not yet mapped
-    unmapped_cols = [c for c in df.columns if c not in mapping]
-    if unmapped_cols and len(used_standards) < len(RULES):
-        # Try to get API key from multiple sources
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            try:
-                import streamlit as st
-                api_key = st.secrets.get("ANTHROPIC_API_KEY")
-            except:
-                pass
+.insight-box {
+    background: #f0f7ee;
+    border: 1px solid #c8dcc4;
+    border-left: 4px solid #4a8a44;
+    border-radius: 0 8px 8px 0;
+    padding: 0.8rem 1rem;
+    margin: 0.4rem 0;
+    font-size: 0.88rem;
+    color: #1a2e1a;
+}
 
-        if api_key:
-            sample_data = {}
-            for col in unmapped_cols[:10]:
-                sample_data[col] = df[col].dropna().head(3).tolist()
+.upload-area {
+    background: #ffffff;
+    border: 2px dashed #c8d8c8;
+    border-radius: 12px;
+    padding: 3rem 2rem;
+    text-align: center;
+}
 
-            remaining_standards = {k: v for k, v in STANDARD_COLUMNS.items()
-                                   if k not in used_standards}
-            if remaining_standards and sample_data:
-                standard_desc = "\n".join([f"- {k}: {v}"
-                                          for k, v in remaining_standards.items()])
-                prompt = f"""Map these columns to standard names if they match:
-Columns: {json.dumps(sample_data, indent=2, default=str)}
-Standards: {standard_desc}
-Return ONLY JSON like: {{"Original Col": "standard_name"}}"""
-
-                try:
-                    response = requests.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "x-api-key": api_key,
-                            "anthropic-version": "2023-06-01",
-                            "content-type": "application/json",
-                        },
-                        json={
-                            "model": "claude-haiku-4-5-20251001",
-                            "max_tokens": 300,
-                            "messages": [{"role": "user", "content": prompt}]
-                        },
-                        timeout=10
-                    )
-                    if response.status_code == 200:
-                        text = response.json()["content"][0]["text"].strip()
-                        text = text.replace("```json", "").replace("```", "").strip()
-                        ai_map = json.loads(text)
-                        for k, v in ai_map.items():
-                            if k in df.columns and v in STANDARD_COLUMNS and k not in mapping:
-                                mapping[k] = v
-                except:
-                    pass
-
-    return mapping
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent;
+    gap: 8px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: #e8f0e8;
+    border-radius: 8px 8px 0 0;
+    color: #2d5e2d;
+    font-weight: 500;
+}
+.stTabs [aria-selected="true"] {
+    background: #1a2e1a !important;
+    color: #a8d5a2 !important;
+}
+hr { border-color: #e0e8e0; }
+</style>
+""", unsafe_allow_html=True)
 
 
+# ── Session state ──────────────────────────────────────────────────────────────
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
+if "messages"     not in st.session_state: st.session_state.messages     = []
+if "thread_id"    not in st.session_state: st.session_state.thread_id    = str(uuid.uuid4())
+if "agent"        not in st.session_state: st.session_state.agent        = build_agent()
+if "data_loaded"  not in st.session_state: st.session_state.data_loaded  = False
+if "quick_action" not in st.session_state: st.session_state.quick_action = None
+if "df_name"      not in st.session_state: st.session_state.df_name      = None
+if "data_changes" not in st.session_state: st.session_state.data_changes = []
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+SAGE_GREEN  = ["#c8e8c2", "#4a8a44", "#1a2e1a"]
+CHART_THEME = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="DM Sans", color="#1a1a1a"),
+    margin=dict(l=10, r=10, t=30, b=10),
+)
+
+def sage_bar(df_agg, x, y, title="", color_col=None):
+    fig = px.bar(df_agg, x=x, y=y,
+                 color=color_col or y,
+                 color_continuous_scale=SAGE_GREEN,
+                 title=title, height=260)
+    fig.update_layout(**CHART_THEME, coloraxis_showscale=False,
+                      title_font_size=13)
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="#e8f0e8")
+    return fig
+
+def sage_line(df_agg, x, y, title=""):
+    fig = px.line(df_agg, x=x, y=y, title=title, height=260,
+                  markers=True, color_discrete_sequence=["#4a8a44"])
+    fig.update_layout(**CHART_THEME, title_font_size=13)
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="#e8f0e8")
+    fig.update_traces(line_width=2.5, marker_size=6)
+    return fig
+
+def sage_pie(df_agg, names, values, title=""):
+    fig = px.pie(df_agg, names=names, values=values, title=title,
+                 color_discrete_sequence=px.colors.sequential.Greens_r,
+                 height=260)
+    fig.update_layout(**CHART_THEME, title_font_size=13,
+                      showlegend=True,
+                      legend=dict(orientation="v", x=1, y=0.5))
+    fig.update_traces(textposition="inside", textinfo="percent+label")
+    return fig
+
+def fmt_currency(v):
+    try:
+        v = float(v)
+        if v >= 1_000_000: return f"${v/1_000_000:.1f}M"
+        if v >= 1_000:     return f"${v/1_000:.0f}K"
+        return f"${v:.0f}"
+    except:
+        return "$0"
+
+def safe_groupby(df, group_col, val_col, agg="sum"):
+    """Safe groupby that converts to numeric first and drops NaN/header-leaked group keys."""
+    d = df.dropna(subset=[group_col]).copy()
+    d = d[d[group_col].astype(str).str.strip() != ""]
+    d = d[d[group_col].astype(str).str.strip().str.lower() != group_col.lower()]
+    d[val_col] = pd.to_numeric(d[val_col], errors='coerce').fillna(0)
+    if agg == "sum":
+        return d.groupby(group_col)[val_col].sum().reset_index()
+    return d.groupby(group_col)[val_col].mean().reset_index()
+
+def _content_to_str(content):
+    """Normalise LangChain message content to a plain string."""
+    if isinstance(content, list):
+        return " ".join(
+            c.get("text", "") if isinstance(c, dict) else str(c)
+            for c in content
+        )
+    return str(content) if content is not None else ""
+
+def run_agent(question):
+    try:
+        config = {"configurable": {"thread_id": st.session_state.thread_id}}
+        result = st.session_state.agent.invoke(
+            {"messages": [{"role": "user", "content": question}]},
+            config=config,
+        )
+        messages = result["messages"]
+        for msg in reversed(messages):
+            if hasattr(msg, 'content') and msg.content:
+                if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
+                    return _content_to_str(msg.content)
+        return _content_to_str(messages[-1].content)
+    except Exception as e:
+        return f"⚠️ Error: {str(e)}"
+
+def _clean_group(df, col):
+    """Return a copy of df with NaN and header-leaked values removed from col."""
+    d = df.dropna(subset=[col]).copy()
+    d = d[d[col].astype(str).str.strip().str.lower() != col.lower()]
+    d = d[d[col].astype(str).str.strip() != ""]
+    return d
+
+def auto_insights(df):
+    """Generate 3-5 plain English insights from the data automatically."""
+    insights = []
+    if "region" in df.columns and "revenue" in df.columns:
+        d = _clean_group(df, "region")
+        if len(d) > 1:
+            reg = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["region"]).sum().sort_values()
+            if len(reg) >= 2 and reg.iloc[-1] > 0:
+                top, bot = reg.index[-1], reg.index[0]
+                gap = round((1 - reg[bot] / reg[top]) * 100)
+                insights.append(f"📍 {top} is your strongest region. {bot} is {gap}% behind — worth investigating.")
+    if "category" in df.columns and "revenue" in df.columns:
+        d = _clean_group(df, "category")
+        if len(d) > 0:
+            cat = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["category"]).sum().sort_values(ascending=False)
+            if len(cat) >= 1:
+                insights.append(f"🏆 {cat.index[0]} drives the most revenue ({fmt_currency(cat.iloc[0])})." +
+                                 (f" {cat.index[-1]} is your smallest category." if len(cat) > 1 else ""))
+    if "channel" in df.columns and "revenue" in df.columns:
+        d = _clean_group(df, "channel")
+        if len(d) > 0:
+            ch = pd.to_numeric(d["revenue"], errors="coerce").groupby(d["channel"]).sum().sort_values(ascending=False)
+            if len(ch) >= 1:
+                insights.append(f"🛒 {ch.index[0]} channel leads with {fmt_currency(ch.iloc[0])} in revenue.")
+    if "margin_pct" in df.columns and "product" in df.columns:
+        d = _clean_group(df, "product")
+        if len(d) > 0:
+            avg_margin = pd.to_numeric(d["margin_pct"], errors='coerce').mean()
+            low = pd.to_numeric(d["margin_pct"], errors="coerce").groupby(d["product"]).mean().sort_values().head(1)
+            if len(low) > 0 and not pd.isna(avg_margin):
+                insights.append(f"📊 Average margin is {avg_margin:.1f}%. '{low.index[0]}' has the lowest margin at {low.iloc[0]:.1f}%.")
+    if "discount_pct" in df.columns and "revenue" in df.columns:
+        heavy_disc = df[pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0) >= 15]
+        if len(heavy_disc) > 0:
+            pct = round(len(heavy_disc) / len(df) * 100)
+            insights.append(f"💡 {pct}% of orders use discounts of 15%+. Consider if this is intentional strategy.")
+    return insights
 
 
-# ─────────────────────────────────────────────
-# DATA CLEANER
-# ─────────────────────────────────────────────
-def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
-    """
-    Cleans the dataframe using detected column mapping.
-    Returns (cleaned_df, list_of_changes)
-    """
-    changes = []
-    df = df.copy()
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 🌿 Sage")
+    st.markdown("*Wise advice from your data*")
+    st.markdown("---")
 
-    # 1. Strip whitespace from column names
-    df.columns = df.columns.str.strip()
+    st.markdown("**Upload your data**")
+    uploaded = st.file_uploader("CSV or Excel", type=["csv", "xlsx", "xls"])
 
-    # 2. Apply column mapping
-    if col_mapping:
-        df = df.rename(columns=col_mapping)
-        for orig, std in col_mapping.items():
-            changes.append(f"Renamed '{orig}' → '{std}'")
-
-    # 3. Remove header rows mixed into data
-    # (rows where text columns contain column names like "Region", "Product")
-    text_cols = df.select_dtypes(include=["object"]).columns.tolist()
-    col_names_lower = set(df.columns.str.lower().tolist())
-    mask = pd.Series([True] * len(df), index=df.index)
-    for col in text_cols:
-        bad = df[col].astype(str).str.strip().str.lower().isin(col_names_lower)
-        mask = mask & ~bad
-    removed_headers = (~mask).sum()
-    if removed_headers > 0:
-        df = df[mask].reset_index(drop=True)
-        changes.append(f"Removed {removed_headers} header rows mixed into data")
-
-    # 4. Clean numeric columns — remove $, commas, % signs
-    for col in df.columns:
-        if df[col].dtype == object:
-            sample = df[col].dropna().head(10).astype(str)
-            cleaned = sample.str.replace(r'[\$,%\s]', '', regex=True)
-            try:
-                pd.to_numeric(cleaned)
-                df[col] = pd.to_numeric(
-                    df[col].astype(str).str.replace(r'[\$,%\s]', '', regex=True),
-                    errors='coerce'
-                )
-                changes.append(f"Converted '{col}' to numeric")
-            except:
-                pass
-
-    # 5. Fix margin_pct — convert decimal to percentage
-    if "margin_pct" in df.columns:
+    if uploaded:
         try:
-            numeric_margin = pd.to_numeric(df["margin_pct"], errors="coerce")
-            if numeric_margin.dropna().mean() < 1:
-                df["margin_pct"] = numeric_margin * 100
-                changes.append("Converted margin from decimal to percentage")
-        except:
-            pass
+            df_up = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") \
+                    else smart_read_excel(uploaded)
+            changes = load_dataframe(df_up)
+            st.session_state.data_loaded  = True
+            st.session_state.df_name      = uploaded.name
+            st.session_state.messages     = []
+            st.session_state.thread_id    = str(uuid.uuid4())
+            st.session_state.data_changes = changes
+            st.session_state.agent = build_agent()
+            st.success(f"✅ Loaded {len(df_up):,} rows — data auto-cleaned and ready")
+            if changes:
+                with st.expander(f"🤖 AI cleaned {len(changes)} things automatically — click to see"):
+                    for c in changes:
+                        st.markdown(f"✅ {c}")
+        except Exception as e:
+            st.error(f"Could not read file: {e}")
 
-    # 6. Parse date column — try 'date' first, then any date-like column
-    date_parsed = False
-    date_candidates = ["date"] + [c for c in df.columns if c != "date" and
-                                   any(x in c.lower() for x in ["date", "time", "invoice", "order"])]
-    for date_col in date_candidates:
-        if date_col in df.columns and not date_parsed:
+    # ── Manual column mapping for unknown columns ───────────────────────────────
+    if st.session_state.data_loaded:
+        unmapped = get_unmapped_columns()
+        raw = get_raw_df()
+        if unmapped and raw is not None:
+            st.markdown("---")
+            st.markdown("**🗂️ Map unknown columns**")
+            st.caption("Sage couldn't recognize these columns. Tell it what they represent:")
+
+            STANDARD_OPTIONS = ["— skip —", "revenue", "profit", "units_sold",
+                                 "margin_pct", "region", "category", "product",
+                                 "channel", "date", "retailer", "price",
+                                 "discount_pct", "state", "city", "customer"]
+
+            manual_map = {}
+            for col in unmapped[:8]:
+                sample = raw[col].dropna().head(3).tolist()
+                sample_str = ", ".join(str(v) for v in sample)
+                st.caption(f"`{col}` — e.g. {sample_str}")
+                chosen = st.selectbox(
+                    col, STANDARD_OPTIONS,
+                    key=f"colmap_{col}",
+                    label_visibility="collapsed"
+                )
+                if chosen != "— skip —":
+                    manual_map[col] = chosen
+
+            if st.button("✅ Apply my mappings", use_container_width=True):
+                if manual_map:
+                    changes = load_dataframe(raw, extra_mapping=manual_map)
+                    st.session_state.data_changes = changes
+                    st.session_state.agent = build_agent()
+                    st.success("Mappings applied! Dashboard will refresh.")
+                    st.rerun()
+
+    if not st.session_state.data_loaded:
+        if st.button("Load sample sales data"):
             try:
-                parsed = pd.to_datetime(df[date_col], infer_datetime_format=True, errors="coerce")
-                if parsed.notna().sum() > len(df) * 0.5:
-                    df["date"] = parsed
-                    df["month"] = parsed.dt.strftime("%B")
-                    df["quarter"] = "Q" + parsed.dt.quarter.astype(str)
-                    df["year"] = parsed.dt.year
-                    date_parsed = True
-                    changes.append(f"Parsed '{date_col}' → extracted month, quarter, year")
+                df_s = pd.read_csv("sample_sales_data.csv")
+                changes = load_dataframe(df_s)
+                st.session_state.data_loaded  = True
+                st.session_state.df_name      = "sample_sales_data.csv"
+                st.session_state.messages     = []
+                st.session_state.thread_id    = str(uuid.uuid4())
+                st.session_state.data_changes = changes
+                st.session_state.agent        = build_agent()
+                st.rerun()
             except:
-                pass
+                st.error("Run generate_data.py first")
 
-    # 7. Derive revenue if missing
-    if "revenue" not in df.columns and "price" in df.columns and "units_sold" in df.columns:
-        df["revenue"] = (pd.to_numeric(df["price"], errors="coerce") *
-                         pd.to_numeric(df["units_sold"], errors="coerce")).round(2)
-        changes.append("Derived 'revenue' from price × units_sold")
+    st.markdown("---")
 
-    # Fix quarter format — convert 1,2,3,4 to Q1,Q2,Q3,Q4
-    if "quarter" in df.columns:
-        sample = df["quarter"].dropna().astype(str).head(5).tolist()
-        if all(q in ["1","2","3","4"] for q in sample):
-            df["quarter"] = "Q" + df["quarter"].astype(str)
-            changes.append("Formatted quarter column → Q1, Q2, Q3, Q4")
+    if st.session_state.data_loaded:
+        # Filters
+        df_now = get_df()
+        st.markdown("**Filters**")
 
-    # 8. Derive profit if missing
-    if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
-        df["profit"] = (pd.to_numeric(df["revenue"], errors="coerce") *
-                        pd.to_numeric(df["margin_pct"], errors="coerce") / 100).round(2)
-        changes.append("Derived 'profit' from revenue × margin_pct")
+        regions = ["All"] + sorted(df_now["region"].dropna().unique().tolist()) \
+                  if "region" in df_now.columns else ["All"]
+        sel_region = st.selectbox("Region", regions)
 
-    # 9. Fill missing numeric values
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    null_counts = df[numeric_cols].isnull().sum()
-    cols_with_nulls = null_counts[null_counts > 0]
-    if len(cols_with_nulls) > 0:
-        df[numeric_cols] = df[numeric_cols].fillna(0)
-        changes.append(f"Filled missing values in {len(cols_with_nulls)} column(s)")
+        categories = ["All"] + sorted(df_now["category"].dropna().unique().tolist()) \
+                     if "category" in df_now.columns else ["All"]
+        sel_cat = st.selectbox("Category", categories)
 
-    # 10. Strip whitespace from text columns
-    for col in df.select_dtypes(include=["object"]).columns:
-        df[col] = df[col].astype(str).str.strip()
+        channels = ["All"] + sorted(df_now["channel"].dropna().unique().tolist()) \
+                   if "channel" in df_now.columns else ["All"]
+        sel_channel = st.selectbox("Channel", channels)
 
-    # 11. Remove fully empty rows
-    before = len(df)
-    df = df.dropna(how="all")
-    removed = before - len(df)
-    if removed > 0:
-        changes.append(f"Removed {removed} empty rows")
+        st.session_state["filter_region"]   = sel_region
+        st.session_state["filter_category"] = sel_cat
+        st.session_state["filter_channel"]  = sel_channel
 
-    return df, changes
+        st.markdown("---")
+        st.markdown("**Ask Sage**")
+        quick_qs = [
+            "Give me a full business briefing",
+            "What is working well?",
+            "What needs attention?",
+            "Which region underperforms?",
+            "What are my top products?",
+            "Where should I focus next quarter?",
+        ]
+        for q in quick_qs:
+            if st.button(q, key=f"qa_{q}"):
+                st.session_state.quick_action = q
 
+        st.markdown("---")
+        if st.button("New conversation"):
+            st.session_state.messages    = []
+            st.session_state.thread_id   = str(uuid.uuid4())
+            st.rerun()
 
-# ─────────────────────────────────────────────
-# SMART EXCEL READER
-# Detects and skips title rows automatically
-# ─────────────────────────────────────────────
-def smart_read_excel(file_buffer) -> pd.DataFrame:
-    """Reads Excel file — auto-detects correct header row"""
-    raw = pd.read_excel(file_buffer, header=None)
-
-    header_row = 0
-    for i in range(min(10, len(raw))):
-        row = raw.iloc[i].astype(str).str.strip()
-        non_null = (row.str.lower() != 'nan').sum()
-        if non_null >= max(3, len(raw.columns) * 0.5):
-            header_row = i
-            break
-
-    file_buffer.seek(0)
-    df = pd.read_excel(file_buffer, header=header_row)
-    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-    return df
+        st.markdown(f"""
+        <div style="font-size:0.7rem;color:#6a9e64;margin-top:0.5rem">
+        {st.session_state.df_name}<br>
+        {len(df_now):,} rows · {len(df_now.columns)} columns
+        </div>""", unsafe_allow_html=True)
 
 
-def smart_read_csv(file_buffer) -> pd.DataFrame:
-    """
-    Reads CSV file — handles files where first column is unnamed index
-    and real headers are in the first data row.
-    """
-    try:
-        file_buffer.seek(0)
-        df = pd.read_csv(file_buffer)
+# ── Header ─────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="sage-header">
+    <div class="sage-title">🌿 Sage</div>
+    <div class="sage-subtitle">Wise advice from your data — helping you make better decisions</div>
+</div>
+""", unsafe_allow_html=True)
 
-        # Check if columns are all Unnamed — means real headers are in row 0
-        unnamed_count = sum(1 for c in df.columns if str(c).startswith("Unnamed:"))
-        if unnamed_count > len(df.columns) * 0.5:
-            file_buffer.seek(0)
-            raw = pd.read_csv(file_buffer, header=None)
-            for i in range(min(5, len(raw))):
-                row = raw.iloc[i].astype(str)
-                non_null = (row.str.lower() != 'nan').sum()
-                if non_null >= max(3, len(raw.columns) * 0.5):
-                    raw.columns = raw.iloc[i].astype(str).str.strip()
-                    raw = raw.iloc[i+1:].reset_index(drop=True)
-                    df = raw
-                    break
-
-        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-        return df
-    except Exception as e:
-        raise Exception(f"Could not read CSV: {str(e)}")
+# ── No data state ──────────────────────────────────────────────────────────────
+if not st.session_state.data_loaded:
+    st.markdown("""
+    <div class="upload-area">
+        <div style="font-size:2.5rem;margin-bottom:0.8rem">🌿</div>
+        <div style="font-size:1rem;font-weight:500;color:#1a2e1a;margin-bottom:0.4rem">
+            Upload your data to get started
+        </div>
+        <div style="font-size:0.85rem;color:#6a9e64">
+            Upload a CSV or Excel file — or load the sample sales dataset from the sidebar
+        </div>
+    </div>""", unsafe_allow_html=True)
+    st.stop()
 
 
-# ─────────────────────────────────────────────
-# MAIN LOAD FUNCTION
-# Called when user uploads any file
-# ─────────────────────────────────────────────
-def load_dataframe(df: pd.DataFrame, db_path: str = None, extra_mapping: dict = None):
-    """
-    1. Drops empty rows/cols
-    2. Detects column mapping
-    3. Cleans and standardizes
-    4. Loads to SQLite
-    Returns (changes, unmapped_columns)
-    """
-    global _df, _db_path, _cleaning_report
-
-    if db_path is None:
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
-
-    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-
-    # Auto-detect columns
-    col_mapping = ai_detect_columns(df)
-
-    # Merge any manual mapping from user
-    if extra_mapping:
-        col_mapping.update(extra_mapping)
-
-    # Find columns that couldn't be mapped to any standard name
-    STANDARD = set(STANDARD_COLUMNS.keys())
-    mapped_originals = set(col_mapping.keys())
-    mapped_standards = set(col_mapping.values())
-    unmapped = [c for c in df.columns
-                if c not in mapped_originals      # not mapped from
-                and c not in mapped_standards     # not already a standard name
-                and c not in STANDARD]            # not already standard
-
-    # Clean with detected mapping
-    df_clean, changes = clean_dataframe(df, col_mapping)
-
-    _df = df_clean
-    _db_path = db_path
-    _cleaning_report = changes
-
-    conn = sqlite3.connect(db_path)
-    df_clean.to_sql("sales", conn, if_exists="replace", index=False)
-    conn.close()
-
-    return changes, unmapped
+# ── Apply filters ──────────────────────────────────────────────────────────────
+df = get_df().copy()
+if st.session_state.get("filter_region", "All") != "All":
+    df = df[df["region"] == st.session_state["filter_region"]]
+if st.session_state.get("filter_category", "All") != "All":
+    df = df[df["category"] == st.session_state["filter_category"]]
+if st.session_state.get("filter_channel", "All") != "All":
+    df = df[df["channel"] == st.session_state["filter_channel"]]
 
 
-def get_df():
-    return _df
+# ── TWO TABS ───────────────────────────────────────────────────────────────────
+tab1, tab2 = st.tabs(["📊 Dashboard", "💬 Chat with Sage"])
 
 
-def get_cleaning_report():
-    return _cleaning_report
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — DASHBOARD
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
+
+    # ── KPI cards ──────────────────────────────────────────────────────────────
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+    def safe_sum(df, col):
+        if col not in df.columns: return 0
+        return pd.to_numeric(df[col], errors='coerce').sum() or 0
+
+    def safe_mean(df, col):
+        if col not in df.columns: return 0
+        return pd.to_numeric(df[col], errors='coerce').mean() or 0
+
+    total_rev   = safe_sum(df, "revenue")
+    total_prof  = safe_sum(df, "profit")
+    avg_margin  = (total_prof / total_rev * 100) if total_rev > 0 else 0
+    total_units = safe_sum(df, "units_sold")
+    total_orders = len(df)
+    avg_disc    = safe_mean(df, "discount_pct")
+
+    with k1:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-value">{fmt_currency(total_rev)}</div>
+            <div class="kpi-label">Total Revenue</div>
+        </div>""", unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-value">{fmt_currency(total_prof)}</div>
+            <div class="kpi-label">Total Profit</div>
+        </div>""", unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-value">{avg_margin:.1f}%</div>
+            <div class="kpi-label">Avg Margin</div>
+        </div>""", unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-value">{total_units:,}</div>
+            <div class="kpi-label">Units Sold</div>
+        </div>""", unsafe_allow_html=True)
+    with k5:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-value">{total_orders:,}</div>
+            <div class="kpi-label">Total Orders</div>
+        </div>""", unsafe_allow_html=True)
+    with k6:
+        st.markdown(f"""<div class="kpi-card">
+            <div class="kpi-value">{avg_disc:.1f}%</div>
+            <div class="kpi-label">Avg Discount</div>
+        </div>""", unsafe_allow_html=True)
+
+    # ── Auto Insights ──────────────────────────────────────────────────────────
+    insights = auto_insights(df)
+    if insights:
+        st.markdown('<div class="section-header">🌿 Key Insights</div>',
+                    unsafe_allow_html=True)
+        for ins in insights:
+            st.markdown(f'<div class="insight-box">{ins}</div>',
+                        unsafe_allow_html=True)
+
+    # ── Row 1: Revenue by Region + Monthly Trend ───────────────────────────────
+    st.markdown('<div class="section-header">Revenue Performance</div>',
+                unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if "region" in df.columns and "revenue" in df.columns:
+            reg_df = safe_groupby(df, "region", "revenue").sort_values("revenue", ascending=False)
+            st.plotly_chart(sage_bar(reg_df, "region", "revenue", "Revenue by Region"),
+                            use_container_width=True)
+
+    with c2:
+        if "month" in df.columns and "revenue" in df.columns:
+            month_order = ["January","February","March","April","May","June",
+                           "July","August","September","October","November","December"]
+            mon_df = safe_groupby(df, "month", "revenue")
+            mon_df["month"] = pd.Categorical(mon_df["month"], categories=month_order, ordered=True)
+            mon_df = mon_df.sort_values("month")
+            st.plotly_chart(sage_line(mon_df, "month", "revenue", "Monthly Revenue Trend"),
+                            use_container_width=True)
+
+    # ── Row 2: Category + Channel ──────────────────────────────────────────────
+    st.markdown('<div class="section-header">Category & Channel Breakdown</div>',
+                unsafe_allow_html=True)
+    c3, c4 = st.columns(2)
+
+    with c3:
+        # Use category if available, fall back to product
+        cat_col = "category" if "category" in df.columns else \
+                  "product" if "product" in df.columns else None
+        if cat_col and "revenue" in df.columns:
+            cat_df = safe_groupby(df, cat_col, "revenue")
+            # If too many values (product), show top 8
+            if len(cat_df) > 8:
+                cat_df = cat_df.sort_values("revenue", ascending=False).head(8)
+            label = "Revenue by Category" if cat_col == "category" else "Revenue by Product"
+            st.plotly_chart(sage_pie(cat_df, cat_col, "revenue", label),
+                            use_container_width=True)
+
+    with c4:
+        if "channel" in df.columns and "revenue" in df.columns:
+            ch_df = safe_groupby(df, "channel", "revenue").sort_values("revenue", ascending=False)
+            st.plotly_chart(sage_bar(ch_df, "channel", "revenue", "Revenue by Channel"),
+                            use_container_width=True)
+
+    # ── Row 3: Top Products + Margin by Category ───────────────────────────────
+    st.markdown('<div class="section-header">Product Performance</div>',
+                unsafe_allow_html=True)
+    c5, c6 = st.columns(2)
+
+    with c5:
+        if "product" in df.columns and "revenue" in df.columns:
+            prod_df = safe_groupby(df, "product", "revenue").sort_values("revenue", ascending=True).tail(8)
+            fig = px.bar(prod_df, x="revenue", y="product", orientation="h",
+                         title="Top Products by Revenue", height=300,
+                         color="revenue",
+                         color_continuous_scale=SAGE_GREEN)
+            fig.update_layout(**CHART_THEME, coloraxis_showscale=False,
+                              title_font_size=13)
+            fig.update_xaxes(showgrid=True, gridcolor="#e8f0e8")
+            fig.update_yaxes(showgrid=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with c6:
+        cat_col2 = "category" if "category" in df.columns else \
+                   "product" if "product" in df.columns else None
+        if cat_col2 and "margin_pct" in df.columns:
+            mar_df = safe_groupby(df, cat_col2, "margin_pct", "mean").sort_values("margin_pct", ascending=False)
+            mar_df["margin_pct"] = pd.to_numeric(mar_df["margin_pct"], errors="coerce").round(1)
+            label2 = "Avg Margin % by Category" if cat_col2 == "category" else "Avg Margin % by Product"
+            fig = px.bar(mar_df, x=cat_col2, y="margin_pct",
+                         title=label2, height=300,
+                         color="margin_pct",
+                         color_continuous_scale=SAGE_GREEN)
+            fig.update_layout(**CHART_THEME, coloraxis_showscale=False,
+                              title_font_size=13)
+            fig.update_xaxes(showgrid=False)
+            fig.update_yaxes(showgrid=True, gridcolor="#e8f0e8")
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Row 4: Quarterly + Units by Region ────────────────────────────────────
+    st.markdown('<div class="section-header">Volume & Quarterly View</div>',
+                unsafe_allow_html=True)
+    c7, c8 = st.columns(2)
+
+    with c7:
+        if "quarter" in df.columns and "revenue" in df.columns:
+            df_q = df.copy()
+            df_q["revenue"] = pd.to_numeric(df_q["revenue"], errors="coerce").fillna(0)
+            df_q["profit"] = pd.to_numeric(df_q["profit"], errors="coerce").fillna(0)
+            q_df = df_q.groupby("quarter")[["revenue","profit"]].sum().reset_index()
+            fig = go.Figure()
+            fig.add_bar(x=q_df["quarter"], y=q_df["revenue"],
+                        name="Revenue", marker_color="#4a8a44")
+            fig.add_bar(x=q_df["quarter"], y=q_df["profit"],
+                        name="Profit", marker_color="#a8d5a2")
+            fig.update_layout(**CHART_THEME, title="Revenue vs Profit by Quarter",
+                              title_font_size=13, barmode="group", height=280,
+                              legend=dict(orientation="h", y=1.1))
+            fig.update_xaxes(showgrid=False)
+            fig.update_yaxes(showgrid=True, gridcolor="#e8f0e8")
+            st.plotly_chart(fig, use_container_width=True)
+
+    with c8:
+        if "region" in df.columns and "units_sold" in df.columns:
+            u_df = safe_groupby(df, "region", "units_sold").sort_values("units_sold", ascending=False)
+            st.plotly_chart(sage_bar(u_df, "region", "units_sold", "Units Sold by Region"),
+                            use_container_width=True)
+
+    # ── Row 5: Discount analysis ───────────────────────────────────────────────
+    if "discount_pct" in df.columns and "revenue" in df.columns:
+        st.markdown('<div class="section-header">Discount Analysis</div>',
+                    unsafe_allow_html=True)
+        c9, c10 = st.columns(2)
+
+        with c9:
+            disc_col = pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0)
+            disc_bins = pd.cut(disc_col,
+                               bins=[-1, 0, 5, 10, 15, 20, 100],
+                               labels=["No discount","1-5%","6-10%","11-15%","16-20%","20%+"])
+            df["_rev_num"] = pd.to_numeric(df["revenue"], errors="coerce").fillna(0)
+            disc_df = df.groupby(disc_bins, observed=True)["_rev_num"].sum().reset_index()
+            disc_df.columns = ["discount_band", "revenue"]
+            st.plotly_chart(sage_bar(disc_df, "discount_band", "revenue",
+                                     "Revenue by Discount Band"),
+                            use_container_width=True)
+
+        with c10:
+            if "region" in df.columns:
+                disc_reg = safe_groupby(df, "region", "discount_pct", "mean")
+                disc_reg["discount_pct"] = disc_reg["discount_pct"].round(1)
+                st.plotly_chart(sage_bar(disc_reg, "region", "discount_pct",
+                                         "Avg Discount % by Region"),
+                                use_container_width=True)
 
 
-# ─────────────────────────────────────────────
-# LANGCHAIN TOOLS
-# ─────────────────────────────────────────────
-@tool
-def profile_data(input: str = "") -> str:
-    """
-    Profiles the uploaded dataset. Returns shape, columns, types,
-    missing values, and statistics. Always call this first.
-    """
-    df = get_df()
-    if df is None:
-        return "No data loaded yet."
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — CHAT
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.markdown("""
+    <div style="font-size:0.88rem;color:#4a8a44;margin-bottom:1rem;padding:0.8rem 1rem;
+    background:#f0f7ee;border-radius:8px;border:1px solid #c8dcc4">
+    💬 Ask Sage anything about your data in plain English.
+    Type your question in the box at the bottom and press Enter.
+    </div>""", unsafe_allow_html=True)
 
-    profile = {
-        "rows": len(df),
-        "columns": len(df.columns),
-        "column_names": df.columns.tolist(),
-        "dtypes": df.dtypes.astype(str).to_dict(),
-        "missing_values": df.isnull().sum().to_dict(),
-        "numeric_summary": {},
-        "categorical_summary": {},
-        "cleaning_applied": get_cleaning_report(),
-    }
+    # Process quick action from sidebar first (before rendering)
+    if st.session_state.get("quick_action"):
+        pending = st.session_state.quick_action
+        st.session_state.quick_action = None
+        st.session_state.messages.append({"role": "user", "content": pending})
+        with st.spinner("Sage is thinking..."):
+            answer = run_agent(pending)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
-    for col in df.select_dtypes(include=[np.number]).columns:
-        profile["numeric_summary"][col] = {
-            "min": round(float(df[col].min()), 2),
-            "max": round(float(df[col].max()), 2),
-            "mean": round(float(df[col].mean()), 2),
-            "median": round(float(df[col].median()), 2),
-        }
+    # Reserve the message area above the chat input
+    messages_area = st.container()
 
-    for col in df.select_dtypes(include=["object"]).columns:
-        profile["categorical_summary"][col] = {
-            "unique_values": int(df[col].nunique()),
-            "top_5": df[col].value_counts().head(5).to_dict(),
-        }
+    # Chat input — renders at the bottom of the tab
+    user_input = st.chat_input("Ask Sage anything about your data...")
 
-    return json.dumps(profile, indent=2)
+    # Process typed input immediately so it appears in the same render pass
+    if user_input and user_input.strip():
+        q = user_input.strip()
+        st.session_state.messages.append({"role": "user", "content": q})
+        with st.spinner("Sage is thinking..."):
+            answer = run_agent(q)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
+    # Render all messages into the container above the chat input (no rerun needed)
+    with messages_area:
+        if not st.session_state.messages:
+            st.markdown("""
+            <div style="text-align:center;padding:2rem 1rem;opacity:0.5">
+                <div style="font-size:2rem;margin-bottom:0.8rem">🌿</div>
+                <div style="font-size:0.88rem;color:#4a8a44">
+                    Click a quick question in the sidebar to get started,<br>or type below
+                </div>
+            </div>""", unsafe_allow_html=True)
 
-@tool
-def run_eda(focus_column: str = "") -> str:
-    """
-    Runs exploratory data analysis — correlations, outliers,
-    top/bottom performers. Pass column name to focus on it.
-    """
-    df = get_df()
-    if df is None:
-        return "No data loaded yet."
-
-    results = {}
-    numeric_df = df.select_dtypes(include=[np.number])
-
-    # Strong correlations
-    if len(numeric_df.columns) > 1:
-        corr = numeric_df.corr().round(2)
-        strong = []
-        for i in range(len(corr.columns)):
-            for j in range(i + 1, len(corr.columns)):
-                val = corr.iloc[i, j]
-                if abs(val) > 0.5:
-                    strong.append({
-                        "col1": corr.columns[i],
-                        "col2": corr.columns[j],
-                        "correlation": float(val)
-                    })
-        results["strong_correlations"] = strong
-
-    # Outliers
-    outliers = {}
-    for col in numeric_df.columns:
-        Q1 = df[col].quantile(0.25)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
-        count = int(((df[col] < Q1 - 1.5*IQR) | (df[col] > Q3 + 1.5*IQR)).sum())
-        if count > 0:
-            outliers[col] = count
-    results["outliers"] = outliers
-
-    # Category analysis
-    rev_col = next((c for c in ["revenue", "profit", "units_sold"]
-                    if c in df.columns), None)
-    if rev_col:
-        for cat_col in df.select_dtypes(include=["object"]).columns[:3]:
-            grouped = df.groupby(cat_col)[rev_col].sum().sort_values(ascending=False)
-            results[f"{cat_col}_by_{rev_col}"] = grouped.round(2).to_dict()
-
-    return json.dumps(results, indent=2)
-
-
-@tool
-def run_sql(query: str) -> str:
-    """
-    Executes a SQL SELECT query against the uploaded dataset.
-    Table is always called 'sales'. Only SELECT is allowed.
-    """
-    if _db_path is None:
-        return "No data loaded yet."
-
-    query = query.strip()
-    if not query.upper().startswith("SELECT"):
-        return "Only SELECT queries are allowed."
-
-    try:
-        conn = sqlite3.connect(_db_path)
-        result = pd.read_sql_query(query, conn)
-        conn.close()
-        if result.empty:
-            return "Query returned 0 rows."
-        return result.head(20).to_string(index=False)
-    except Exception as e:
-        return f"SQL Error: {str(e)}"
-
-
-@tool
-def calculate_kpis(input: str = "") -> str:
-    """
-    Calculates key business KPIs. Call for business overviews.
-    """
-    df = get_df()
-    if df is None:
-        return "No data loaded yet."
-
-    kpis = {}
-
-    if "revenue" in df.columns:
-        kpis["total_revenue"] = round(float(df["revenue"].sum()), 2)
-        kpis["avg_order_revenue"] = round(float(df["revenue"].mean()), 2)
-
-    if "profit" in df.columns:
-        kpis["total_profit"] = round(float(df["profit"].sum()), 2)
-        if "revenue" in df.columns and df["revenue"].sum() > 0:
-            kpis["avg_margin_pct"] = round(
-                float(df["profit"].sum() / df["revenue"].sum() * 100), 1)
-
-    if "units_sold" in df.columns:
-        kpis["total_units_sold"] = int(df["units_sold"].sum())
-
-    for group_col in ["region", "category", "channel", "product", "retailer"]:
-        if group_col in df.columns and "revenue" in df.columns:
-            grouped = df.groupby(group_col)["revenue"].sum().sort_values(ascending=False)
-            kpis[f"revenue_by_{group_col}"] = grouped.round(2).to_dict()
-            if group_col in ["region", "category"]:
-                kpis[f"top_{group_col}"] = grouped.index[0]
-
-    if "month" in df.columns and "revenue" in df.columns:
-        monthly = df.groupby("month")["revenue"].sum()
-        kpis["monthly_revenue"] = monthly.round(2).to_dict()
-
-    kpis["available_columns"] = df.columns.tolist()
-    kpis["cleaning_applied"] = get_cleaning_report()
-
-    return json.dumps(kpis, indent=2)
-
-
-@tool
-def get_schema(input: str = "") -> str:
-    """
-    Returns the schema of the uploaded dataset.
-    Call before writing SQL to know exact column names.
-    """
-    df = get_df()
-    if df is None:
-        return "No data loaded yet."
-
-    schema = "Table: sales\nColumns:\n"
-    for col, dtype in df.dtypes.items():
-        sample = df[col].dropna().iloc[0] if len(df[col].dropna()) > 0 else "N/A"
-        schema += f"  - {col} ({dtype}) — example: {sample}\n"
-    return schema
+        for msg in st.session_state.messages:
+            # Ensure content is always a plain string
+            raw = msg["content"]
+            if isinstance(raw, list):
+                raw = " ".join(
+                    c.get("text", "") if isinstance(c, dict) else str(c)
+                    for c in raw
+                )
+            if msg["role"] == "user":
+                st.markdown(f"""
+                <div class="chat-user">
+                    <div class="chat-label user-label">You</div>
+                    {raw}
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="chat-agent">
+                    <div class="chat-label agent-label">Sage</div>
+                    {raw.replace(chr(10), "<br>")}
+                </div>""", unsafe_allow_html=True)
