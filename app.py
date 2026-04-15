@@ -347,15 +347,15 @@ with st.sidebar:
         df_now = get_df()
         st.markdown("**Filters**")
 
-        regions = ["All"] + sorted(df_now["region"].unique().tolist()) \
+        regions = ["All"] + sorted(df_now["region"].dropna().unique().tolist()) \
                   if "region" in df_now.columns else ["All"]
         sel_region = st.selectbox("Region", regions)
 
-        categories = ["All"] + sorted(df_now["category"].unique().tolist()) \
+        categories = ["All"] + sorted(df_now["category"].dropna().unique().tolist()) \
                      if "category" in df_now.columns else ["All"]
         sel_cat = st.selectbox("Category", categories)
 
-        channels = ["All"] + sorted(df_now["channel"].unique().tolist()) \
+        channels = ["All"] + sorted(df_now["channel"].dropna().unique().tolist()) \
                    if "channel" in df_now.columns else ["All"]
         sel_channel = st.selectbox("Channel", channels)
 
