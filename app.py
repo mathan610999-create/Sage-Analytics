@@ -238,9 +238,10 @@ def fmt_currency(v):
         return "$0"
 
 def safe_groupby(df, group_col, val_col, agg="sum"):
-    """Safe groupby that converts to numeric first and drops NaN group keys."""
+    """Safe groupby that converts to numeric first and drops NaN/header-leaked group keys."""
     d = df.dropna(subset=[group_col]).copy()
     d = d[d[group_col].astype(str).str.strip() != ""]
+    d = d[d[group_col].astype(str).str.strip().str.lower() != group_col.lower()]
     d[val_col] = pd.to_numeric(d[val_col], errors='coerce').fillna(0)
     if agg == "sum":
         return d.groupby(group_col)[val_col].sum().reset_index()

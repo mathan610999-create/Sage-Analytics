@@ -155,11 +155,13 @@ def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
     # 5. Parse date column
     if "date" in df.columns:
         try:
-            df["date"] = pd.to_datetime(df["date"], infer_datetime_format=True)
-            df["month"] = df["date"].dt.strftime("%B")
-            df["quarter"] = "Q" + df["date"].dt.quarter.astype(str)
-            df["year"] = df["date"].dt.year
-            changes.append("Parsed date → extracted month, quarter, year")
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            valid_dates = df["date"].notna().sum()
+            if valid_dates > 0:
+                df["month"] = df["date"].dt.strftime("%B")
+                df["quarter"] = "Q" + df["date"].dt.quarter.astype(str)
+                df["year"] = df["date"].dt.year
+                changes.append("Parsed date → extracted month, quarter, year")
         except:
             pass
 
