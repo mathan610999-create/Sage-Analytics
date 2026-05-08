@@ -1,461 +1,406 @@
 """
-tools.py - All agent tools for Sage
-AI-powered column detection + smart data cleaning for any uploaded file
+tools.py - Sage data layer (dataset-agnostic)
+
+Loads ANY CSV/Excel into SQLite + a pandas DataFrame, profiles columns
+generically, exposes LangChain tools the agent uses to answer questions
+about whatever the user uploaded. No hardcoded business columns.
 """
 
-import pandas as pd
-import numpy as np
-import sqlite3
+from __future__ import annotations
+
 import json
 import os
-import requests
+import re
+import sqlite3
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 from langchain_core.tools import tool
 
-_df: pd.DataFrame = None
+# Module state
+_df: Optional[pd.DataFrame] = None
 _db_path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
-_cleaning_report: list = []
-_unmapped_cols: list = []
-_raw_df: pd.DataFrame = None
+_table_name: str = "data"
+_cleaning_report: List[str] = []
+_profile_cache: Optional[Dict[str, Any]] = None
+_dataset_name: Optional[str] = None
 
 
-# ─────────────────────────────────────────────
-# AI COLUMN DETECTOR
-# Uses Claude to intelligently map any column
-# names to standard names — works on ANY dataset
-# ─────────────────────────────────────────────
-STANDARD_COLUMNS = {
-    "revenue":      "Total monetary value of sales (e.g. Total Sales, Gross Revenue, Amount)",
-    "profit":       "Net earnings after costs (e.g. Operating Profit, Net Income, Earnings)",
-    "units_sold":   "Number of items sold (e.g. Quantity, Units, Volume, Pieces)",
-    "margin_pct":   "Profit as percentage of revenue (e.g. Operating Margin, Gross Margin %)",
-    "region":       "Geographic area (e.g. Territory, Zone, Area, Market)",
-    "category":     "Product group (e.g. Product Category, Type, Segment, Department)",
-    "product":      "Product name or description (e.g. Item, SKU, Product Name)",
-    "channel":      "Sales method or distribution (e.g. Sales Method, Retailer Type, Medium)",
-    "date":         "Transaction date (e.g. Invoice Date, Order Date, Sale Date)",
-    "retailer":     "Store or seller name (e.g. Retailer, Store, Vendor, Account)",
-    "price":        "Unit selling price (e.g. Price per Unit, Unit Price, Rate)",
-    "discount_pct": "Discount percentage applied (e.g. Discount %, Markdown, Promotion)",
-    "state":        "State or province location",
-    "city":         "City location",
-    "customer":     "Customer name or ID",
-}
+# ============================================================================
+# Smart Excel reader — auto-detect header row
+# ============================================================================
+def smart_read_excel(file_buffer) -> pd.DataFrame:
+    """Read an Excel file, auto-detecting the actual header row."""
+    raw = pd.read_excel(file_buffer, header=None)
+    header_row = 0
+    for i in range(min(10, len(raw))):
+        row = raw.iloc[i].astype(str).str.strip()
+        non_null = (row.str.lower() != "nan").sum()
+        if non_null >= max(3, len(raw.columns) * 0.5):
+            header_row = i
+            break
+    file_buffer.seek(0)
+    df = pd.read_excel(file_buffer, header=header_row)
+    return df.dropna(axis=1, how="all").dropna(axis=0, how="all")
 
 
-def ai_detect_columns(df: pd.DataFrame) -> dict:
-    """
-    Uses Claude API to intelligently map any column names
-    to standard names. Works on ANY dataset regardless of
-    how columns are named.
-    Returns: {original_col: standard_col}
-    """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {}
-
-    # Build a sample of the data to send to Claude
-    sample_data = {}
-    for col in df.columns:
-        sample_vals = df[col].dropna().head(3).tolist()
-        sample_data[col] = sample_vals
-
-    standard_desc = "\n".join([f"- {k}: {v}" for k, v in STANDARD_COLUMNS.items()])
-
-    prompt = f"""You are a data analyst. I have a dataset with these columns and sample values:
-
-{json.dumps(sample_data, indent=2, default=str)}
-
-Map each column to ONE of these standard names if it matches:
-{standard_desc}
-
-Rules:
-- Only map if you are confident the column represents that concept
-- Do not map columns that don't match any standard name
-- Each standard name can only be used ONCE (pick the best match)
-- Return ONLY a JSON object like: {{"original_col": "standard_col", ...}}
-- Do not include any explanation, only the JSON
-
-Example output:
-{{"Total Sales": "revenue", "Operating Profit": "profit", "Units Sold": "units_sold"}}"""
-
-    try:
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 500,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=15
-        )
-
-        if response.status_code == 200:
-            text = response.json()["content"][0]["text"].strip()
-            # Clean up response — remove markdown if present
-            text = text.replace("```json", "").replace("```", "").strip()
-            mapping = json.loads(text)
-            # Validate — only keep mappings where original col exists
-            valid = {k: v for k, v in mapping.items()
-                     if k in df.columns and v in STANDARD_COLUMNS}
-            return valid
-    except Exception as e:
-        print(f"AI column detection failed: {e}")
-
-    return {}
+# ============================================================================
+# Generic cleaning
+# ============================================================================
+_NUM_STRIP_RE = re.compile(r"[\$,€£¥%\s]")
 
 
-# ─────────────────────────────────────────────
-# DATA CLEANER
-# ─────────────────────────────────────────────
-def clean_dataframe(df: pd.DataFrame, col_mapping: dict) -> tuple:
-    """
-    Cleans the dataframe using AI-detected column mapping.
-    Returns (cleaned_df, list_of_changes)
-    """
-    changes = []
+def _slugify(name: str) -> str:
+    s = str(name).strip().lower()
+    s = re.sub(r"[^\w]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "col"
+
+
+def _looks_numeric(series: pd.Series, threshold: float = 0.8) -> bool:
+    sample = series.dropna().astype(str).head(50)
+    if sample.empty:
+        return False
+    cleaned = sample.str.replace(_NUM_STRIP_RE, "", regex=True)
+    parsed = pd.to_numeric(cleaned, errors="coerce")
+    return parsed.notna().mean() >= threshold
+
+
+def _looks_datetime(series: pd.Series, threshold: float = 0.8) -> bool:
+    sample = series.dropna().astype(str).head(50)
+    if sample.empty:
+        return False
+    parsed = pd.to_datetime(sample, errors="coerce", utc=False)
+    return parsed.notna().mean() >= threshold
+
+
+def clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+    """Generic cleaning. Returns (cleaned_df, human_readable_changes)."""
+    changes: List[str] = []
     df = df.copy()
 
-    # 1. Strip whitespace from column names
-    df.columns = df.columns.str.strip()
+    original_cols = list(df.columns)
+    df.columns = [_slugify(c) for c in df.columns]
+    renamed = [(o, n) for o, n in zip(original_cols, df.columns) if str(o).strip() != n]
+    if renamed:
+        changes.append(f"Normalised {len(renamed)} column name(s) for SQL safety")
 
-    # 2. Apply AI column mapping
-    if col_mapping:
-        df = df.rename(columns=col_mapping)
-        for orig, std in col_mapping.items():
-            changes.append(f"Renamed '{orig}' → '{std}'")
+    before_rows = len(df)
+    df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
+    if len(df) < before_rows:
+        changes.append(f"Removed {before_rows - len(df)} empty row(s)")
 
-    # 3. Clean numeric columns — remove $, commas, % signs
+    converted_numeric: List[str] = []
     for col in df.columns:
-        if df[col].dtype == object:
-            sample = df[col].dropna().head(10).astype(str)
-            cleaned = sample.str.replace(r'[\$,%\s]', '', regex=True)
-            try:
-                pd.to_numeric(cleaned)
-                df[col] = pd.to_numeric(
-                    df[col].astype(str).str.replace(r'[\$,%\s]', '', regex=True),
-                    errors='coerce'
-                )
-                changes.append(f"Converted '{col}' to numeric")
-            except:
-                pass
+        if df[col].dtype == object and _looks_numeric(df[col]):
+            df[col] = pd.to_numeric(
+                df[col].astype(str).str.replace(_NUM_STRIP_RE, "", regex=True),
+                errors="coerce",
+            )
+            converted_numeric.append(col)
+    if converted_numeric:
+        more = "..." if len(converted_numeric) > 6 else ""
+        changes.append(f"Converted {len(converted_numeric)} column(s) to numeric: " + ", ".join(converted_numeric[:6]) + more)
 
-    # 4. Fix margin_pct — convert decimal to percentage
-    if "margin_pct" in df.columns:
-        try:
-            numeric_margin = pd.to_numeric(df["margin_pct"], errors="coerce")
-            if numeric_margin.dropna().mean() < 1:
-                df["margin_pct"] = numeric_margin * 100
-                changes.append("Converted margin from decimal to percentage")
-        except:
-            pass
+    parsed_dates: List[str] = []
+    for col in df.columns:
+        if df[col].dtype == object and _looks_datetime(df[col]):
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+            parsed_dates.append(col)
+    if parsed_dates:
+        changes.append(f"Parsed {len(parsed_dates)} date column(s): " + ", ".join(parsed_dates))
 
-    # 5. Parse date column
-    if "date" in df.columns:
-        try:
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            valid_dates = df["date"].notna().sum()
-            if valid_dates > 0:
-                df["month"] = df["date"].dt.strftime("%B")
-                df["quarter"] = "Q" + df["date"].dt.quarter.astype(str)
-                df["year"] = df["date"].dt.year
-                changes.append("Parsed date → extracted month, quarter, year")
-        except:
-            pass
-
-    # 6. Fill missing numeric values
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    null_counts = df[numeric_cols].isnull().sum()
-    cols_with_nulls = null_counts[null_counts > 0]
-    if len(cols_with_nulls) > 0:
-        df[numeric_cols] = df[numeric_cols].fillna(0)
-        changes.append(f"Filled missing values in {len(cols_with_nulls)} column(s)")
-
-    # 7. Strip whitespace from text columns
     for col in df.select_dtypes(include=["object"]).columns:
         df[col] = df[col].astype(str).str.strip()
-
-    # 8. Remove fully empty rows
-    before = len(df)
-    df = df.dropna(how="all")
-    removed = before - len(df)
-    if removed > 0:
-        changes.append(f"Removed {removed} empty rows")
-
-    # 9. Derive profit if missing
-    if "profit" not in df.columns and "revenue" in df.columns and "margin_pct" in df.columns:
-        df["profit"] = (df["revenue"] * df["margin_pct"] / 100).round(2)
-        changes.append("Derived 'profit' from revenue × margin_pct")
-
-    # 10. Derive revenue if missing
-    if "revenue" not in df.columns and "price" in df.columns and "units_sold" in df.columns:
-        df["revenue"] = (df["price"] * df["units_sold"]).round(2)
-        changes.append("Derived 'revenue' from price × units_sold")
 
     return df, changes
 
 
-# ─────────────────────────────────────────────
-# SMART EXCEL READER
-# Detects and skips title rows automatically
-# ─────────────────────────────────────────────
-def smart_read_excel(file_buffer) -> pd.DataFrame:
-    """Reads Excel file — auto-detects correct header row"""
-    raw = pd.read_excel(file_buffer, header=None)
-
-    header_row = 0
-    for i in range(min(10, len(raw))):
-        row = raw.iloc[i].astype(str).str.strip()
-        non_null = (row.str.lower() != 'nan').sum()
-        if non_null >= max(3, len(raw.columns) * 0.5):
-            header_row = i
-            break
-
-    file_buffer.seek(0)
-    df = pd.read_excel(file_buffer, header=header_row)
-    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-    return df
+# ============================================================================
+# Column classification
+# ============================================================================
+_ID_NAME_RE = re.compile(r"(?:^|_)(id|code|key|uuid|guid|sku)(?:$|_)", re.I)
 
 
-# ─────────────────────────────────────────────
-# MAIN LOAD FUNCTION
-# Called when user uploads any file
-# ─────────────────────────────────────────────
-def load_dataframe(df: pd.DataFrame, db_path: str = None, extra_mapping: dict = None):
+def _looks_like_sequence(s: pd.Series) -> bool:
+    """True if values are essentially a contiguous sequence (e.g. 1,2,3...)."""
+    vals = pd.to_numeric(s, errors="coerce").dropna()
+    if len(vals) < 20:
+        return False
+    diffs = vals.sort_values().diff().dropna()
+    if diffs.empty:
+        return False
+    return float((diffs == diffs.mode().iloc[0]).mean()) > 0.9
+
+
+def _classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
+    """Classify columns into numeric / categorical / datetime / text / id.
+
+    A column is flagged as 'id' only when its NAME looks like an identifier
+    (contains id/code/key/uuid/guid/sku) AND uniqueness is high, OR when its
+    values form a near-perfect sequence. Random high-uniqueness numerics
+    like Salary or Revenue stay as 'numeric'.
     """
-    1. Drops empty rows/cols
-    2. AI detects column mapping
-    3. Cleans and standardizes
-    4. Loads to SQLite
-    Returns list of changes made
-    """
-    global _df, _db_path, _cleaning_report
+    out: Dict[str, List[str]] = {
+        "numeric": [], "datetime": [], "categorical": [], "text": [], "id": [],
+    }
+    n = max(len(df), 1)
+    for col in df.columns:
+        s = df[col]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            out["datetime"].append(col)
+        elif pd.api.types.is_numeric_dtype(s):
+            unique_ratio = s.nunique(dropna=True) / n
+            name_looks_id = bool(_ID_NAME_RE.search(str(col)))
+            is_sequence = pd.api.types.is_integer_dtype(s) and _looks_like_sequence(s)
+            if (name_looks_id and unique_ratio > 0.9) or is_sequence:
+                out["id"].append(col)
+            else:
+                out["numeric"].append(col)
+        else:
+            unique_ratio = s.nunique(dropna=True) / n
+            if unique_ratio > 0.6 and n > 30:
+                out["text"].append(col)
+            else:
+                out["categorical"].append(col)
+    return out
 
-    if db_path is None:
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sage_data.db")
 
-    df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+def build_profile(df: pd.DataFrame) -> Dict[str, Any]:
+    classes = _classify_columns(df)
 
-    # AI-powered column detection
-    col_mapping = ai_detect_columns(df)
+    numeric_summary: Dict[str, Any] = {}
+    for col in classes["numeric"]:
+        s = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(s) == 0:
+            continue
+        numeric_summary[col] = {
+            "count": int(len(s)),
+            "min": round(float(s.min()), 4),
+            "max": round(float(s.max()), 4),
+            "mean": round(float(s.mean()), 4),
+            "median": round(float(s.median()), 4),
+            "sum": round(float(s.sum()), 4),
+            "std": round(float(s.std() or 0), 4),
+        }
 
-    # Merge any manual mapping from user
-    if extra_mapping:
-        col_mapping.update(extra_mapping)
+    categorical_summary: Dict[str, Any] = {}
+    for col in classes["categorical"]:
+        vc = df[col].value_counts(dropna=True).head(8)
+        categorical_summary[col] = {
+            "unique": int(df[col].nunique(dropna=True)),
+            "top": {str(k): int(v) for k, v in vc.items()},
+        }
 
-    # Find unmapped columns — store for UI
-    mapped_originals = set(col_mapping.keys())
-    mapped_standards = set(col_mapping.values())
-    all_standards = set(STANDARD_COLUMNS.keys())
-    global _unmapped_cols, _raw_df
-    _unmapped_cols = [c for c in df.columns
-                      if c not in mapped_originals
-                      and c not in mapped_standards
-                      and c not in all_standards]
-    _raw_df = df.copy()
+    datetime_summary: Dict[str, Any] = {}
+    for col in classes["datetime"]:
+        s = pd.to_datetime(df[col], errors="coerce").dropna()
+        if len(s) == 0:
+            continue
+        datetime_summary[col] = {
+            "min": str(s.min().date()),
+            "max": str(s.max().date()),
+            "span_days": int((s.max() - s.min()).days),
+        }
 
-    # Clean with detected mapping
-    df_clean, changes = clean_dataframe(df, col_mapping)
+    return {
+        "rows": int(len(df)),
+        "columns": int(len(df.columns)),
+        "column_names": list(df.columns),
+        "classes": classes,
+        "numeric_summary": numeric_summary,
+        "categorical_summary": categorical_summary,
+        "datetime_summary": datetime_summary,
+        "missing_per_column": {c: int(df[c].isna().sum()) for c in df.columns},
+        "cleaning_applied": list(_cleaning_report),
+    }
 
-    _df = df_clean
-    _db_path = db_path
+
+# ============================================================================
+# Public load / accessor API
+# ============================================================================
+def load_dataframe(df: pd.DataFrame, dataset_name: str = "dataset") -> List[str]:
+    """Cleans and indexes the dataframe. Returns human-readable changes."""
+    global _df, _cleaning_report, _profile_cache, _dataset_name
+
+    df, changes = clean_dataframe(df)
+    _df = df
     _cleaning_report = changes
+    _dataset_name = dataset_name
+    _profile_cache = build_profile(df)
 
-    conn = sqlite3.connect(db_path)
-    df_clean.to_sql("sales", conn, if_exists="replace", index=False)
+    df_sql = df.copy()
+    for c in df_sql.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_sql[c]):
+            df_sql[c] = df_sql[c].astype(str)
+
+    conn = sqlite3.connect(_db_path)
+    df_sql.to_sql(_table_name, conn, if_exists="replace", index=False)
     conn.close()
 
     return changes
 
 
-def get_unmapped_columns():
-    return _unmapped_cols
-
-
-def get_raw_df():
-    return _raw_df
-
-
-def get_df():
+def get_df() -> Optional[pd.DataFrame]:
     return _df
 
 
-def get_cleaning_report():
-    return _cleaning_report
+def get_profile() -> Optional[Dict[str, Any]]:
+    return _profile_cache
 
 
-# ─────────────────────────────────────────────
-# LANGCHAIN TOOLS
-# ─────────────────────────────────────────────
+def get_dataset_name() -> Optional[str]:
+    return _dataset_name
+
+
+def get_cleaning_report() -> List[str]:
+    return list(_cleaning_report)
+
+
+# ============================================================================
+# LangChain tools
+# ============================================================================
 @tool
 def profile_data(input: str = "") -> str:
-    """
-    Profiles the uploaded dataset. Returns shape, columns, types,
-    missing values, and statistics. Always call this first.
-    """
-    df = get_df()
-    if df is None:
+    """Profile the loaded dataset. Returns JSON with columns, types
+    (numeric/categorical/datetime/text/id), summary stats, top categories,
+    missing-value counts, and cleaning applied. Always call this FIRST."""
+    if _df is None:
         return "No data loaded yet."
-
-    profile = {
-        "rows": len(df),
-        "columns": len(df.columns),
-        "column_names": df.columns.tolist(),
-        "dtypes": df.dtypes.astype(str).to_dict(),
-        "missing_values": df.isnull().sum().to_dict(),
-        "numeric_summary": {},
-        "categorical_summary": {},
-        "cleaning_applied": get_cleaning_report(),
-    }
-
-    for col in df.select_dtypes(include=[np.number]).columns:
-        profile["numeric_summary"][col] = {
-            "min": round(float(df[col].min()), 2),
-            "max": round(float(df[col].max()), 2),
-            "mean": round(float(df[col].mean()), 2),
-            "median": round(float(df[col].median()), 2),
-        }
-
-    for col in df.select_dtypes(include=["object"]).columns:
-        profile["categorical_summary"][col] = {
-            "unique_values": int(df[col].nunique()),
-            "top_5": df[col].value_counts().head(5).to_dict(),
-        }
-
-    return json.dumps(profile, indent=2)
-
-
-@tool
-def run_eda(focus_column: str = "") -> str:
-    """
-    Runs exploratory data analysis — correlations, outliers,
-    top/bottom performers. Pass column name to focus on it.
-    """
-    df = get_df()
-    if df is None:
-        return "No data loaded yet."
-
-    results = {}
-    numeric_df = df.select_dtypes(include=[np.number])
-
-    # Strong correlations
-    if len(numeric_df.columns) > 1:
-        corr = numeric_df.corr().round(2)
-        strong = []
-        for i in range(len(corr.columns)):
-            for j in range(i + 1, len(corr.columns)):
-                val = corr.iloc[i, j]
-                if abs(val) > 0.5:
-                    strong.append({
-                        "col1": corr.columns[i],
-                        "col2": corr.columns[j],
-                        "correlation": float(val)
-                    })
-        results["strong_correlations"] = strong
-
-    # Outliers
-    outliers = {}
-    for col in numeric_df.columns:
-        Q1 = df[col].quantile(0.25)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
-        count = int(((df[col] < Q1 - 1.5*IQR) | (df[col] > Q3 + 1.5*IQR)).sum())
-        if count > 0:
-            outliers[col] = count
-    results["outliers"] = outliers
-
-    # Category analysis
-    rev_col = next((c for c in ["revenue", "profit", "units_sold"]
-                    if c in df.columns), None)
-    if rev_col:
-        for cat_col in df.select_dtypes(include=["object"]).columns[:3]:
-            grouped = df.groupby(cat_col)[rev_col].sum().sort_values(ascending=False)
-            results[f"{cat_col}_by_{rev_col}"] = grouped.round(2).to_dict()
-
-    return json.dumps(results, indent=2)
-
-
-@tool
-def run_sql(query: str) -> str:
-    """
-    Executes a SQL SELECT query against the uploaded dataset.
-    Table is always called 'sales'. Only SELECT is allowed.
-    """
-    if _db_path is None:
-        return "No data loaded yet."
-
-    query = query.strip()
-    if not query.upper().startswith("SELECT"):
-        return "Only SELECT queries are allowed."
-
-    try:
-        conn = sqlite3.connect(_db_path)
-        result = pd.read_sql_query(query, conn)
-        conn.close()
-        if result.empty:
-            return "Query returned 0 rows."
-        return result.head(20).to_string(index=False)
-    except Exception as e:
-        return f"SQL Error: {str(e)}"
-
-
-@tool
-def calculate_kpis(input: str = "") -> str:
-    """
-    Calculates key business KPIs. Call for business overviews.
-    """
-    df = get_df()
-    if df is None:
-        return "No data loaded yet."
-
-    kpis = {}
-
-    if "revenue" in df.columns:
-        kpis["total_revenue"] = round(float(df["revenue"].sum()), 2)
-        kpis["avg_order_revenue"] = round(float(df["revenue"].mean()), 2)
-
-    if "profit" in df.columns:
-        kpis["total_profit"] = round(float(df["profit"].sum()), 2)
-        if "revenue" in df.columns and df["revenue"].sum() > 0:
-            kpis["avg_margin_pct"] = round(
-                float(df["profit"].sum() / df["revenue"].sum() * 100), 1)
-
-    if "units_sold" in df.columns:
-        kpis["total_units_sold"] = int(df["units_sold"].sum())
-
-    for group_col in ["region", "category", "channel", "product", "retailer"]:
-        if group_col in df.columns and "revenue" in df.columns:
-            grouped = df.groupby(group_col)["revenue"].sum().sort_values(ascending=False)
-            kpis[f"revenue_by_{group_col}"] = grouped.round(2).to_dict()
-            if group_col in ["region", "category"]:
-                kpis[f"top_{group_col}"] = grouped.index[0]
-
-    if "month" in df.columns and "revenue" in df.columns:
-        monthly = df.groupby("month")["revenue"].sum()
-        kpis["monthly_revenue"] = monthly.round(2).to_dict()
-
-    kpis["available_columns"] = df.columns.tolist()
-    kpis["cleaning_applied"] = get_cleaning_report()
-
-    return json.dumps(kpis, indent=2)
+    return json.dumps(build_profile(_df), indent=2, default=str)
 
 
 @tool
 def get_schema(input: str = "") -> str:
-    """
-    Returns the schema of the uploaded dataset.
-    Call before writing SQL to know exact column names.
-    """
-    df = get_df()
-    if df is None:
+    """Lightweight schema view: column name, type, one example value.
+    Use this before writing SQL."""
+    if _df is None:
         return "No data loaded yet."
+    lines = [f"Table: {_table_name}", "Columns:"]
+    for col, dtype in _df.dtypes.items():
+        sample = _df[col].dropna().iloc[0] if _df[col].notna().any() else "N/A"
+        sample_str = str(sample)
+        if len(sample_str) > 40:
+            sample_str = sample_str[:37] + "..."
+        lines.append(f"  - {col} ({dtype}) example: {sample_str}")
+    return "\n".join(lines)
 
-    schema = "Table: sales\nColumns:\n"
-    for col, dtype in df.dtypes.items():
-        sample = df[col].dropna().iloc[0] if len(df[col].dropna()) > 0 else "N/A"
-        schema += f"  - {col} ({dtype}) — example: {sample}\n"
-    return schema
+
+@tool
+def run_sql(query: str) -> str:
+    """Run a read-only SQL SELECT against the loaded dataset. Table is 'data'.
+    Returns at most 25 rows. Always call get_schema first to learn the column
+    names."""
+    if _df is None:
+        return "No data loaded yet."
+    q = (query or "").strip().rstrip(";")
+    if not (q.upper().startswith("SELECT") or q.upper().startswith("WITH")):
+        return "Only SELECT/WITH queries are allowed."
+    try:
+        conn = sqlite3.connect(_db_path)
+        result = pd.read_sql_query(q, conn)
+        conn.close()
+        if result.empty:
+            return "Query returned 0 rows."
+        return result.head(25).to_string(index=False)
+    except Exception as e:
+        return f"SQL Error: {e}"
+
+
+@tool
+def value_counts(column: str, top_n: int = 10) -> str:
+    """Most common values for a categorical column and their counts.
+    Use for 'most common X' or 'breakdown of X'."""
+    if _df is None:
+        return "No data loaded yet."
+    if column not in _df.columns:
+        return f"Column '{column}' not found. Available: {list(_df.columns)}"
+    vc = _df[column].value_counts(dropna=True).head(top_n)
+    return vc.to_string()
+
+
+@tool
+def top_n(group_by: str, metric: str, n: int = 5, ascending: bool = False) -> str:
+    """Group by `group_by`, sum `metric`, return top (or bottom) N.
+    ascending=True returns the bottom N. Use for 'top X by Y' questions."""
+    if _df is None:
+        return "No data loaded yet."
+    if group_by not in _df.columns:
+        return f"Group column '{group_by}' not found."
+    if metric not in _df.columns:
+        return f"Metric column '{metric}' not found."
+    s = pd.to_numeric(_df[metric], errors="coerce")
+    if s.isna().all():
+        return f"Metric '{metric}' is not numeric."
+    grouped = s.groupby(_df[group_by]).sum().sort_values(ascending=ascending).head(n)
+    return grouped.round(2).to_string()
+
+
+@tool
+def time_series(date_column: str, metric: str, freq: str = "M") -> str:
+    """Aggregate `metric` over time using `date_column`.
+    freq: D=day, W=week, M=month, Q=quarter, Y=year."""
+    if _df is None:
+        return "No data loaded yet."
+    if date_column not in _df.columns:
+        return f"Date column '{date_column}' not found."
+    if metric not in _df.columns:
+        return f"Metric '{metric}' not found."
+    dates = pd.to_datetime(_df[date_column], errors="coerce")
+    vals = pd.to_numeric(_df[metric], errors="coerce")
+    df_t = pd.DataFrame({"d": dates, "v": vals}).dropna()
+    if df_t.empty:
+        return "No valid date+metric pairs."
+    grouped = df_t.set_index("d")["v"].resample(freq).sum()
+    return grouped.round(2).to_string()
+
+
+@tool
+def correlations(threshold: float = 0.5) -> str:
+    """Pairs of numeric columns whose absolute correlation exceeds the threshold.
+    Useful for finding relationships in unfamiliar datasets."""
+    if _df is None:
+        return "No data loaded yet."
+    num = _df.select_dtypes(include=[np.number])
+    if num.shape[1] < 2:
+        return "Not enough numeric columns to correlate."
+    corr = num.corr().round(3)
+    pairs = []
+    for i in range(len(corr.columns)):
+        for j in range(i + 1, len(corr.columns)):
+            v = corr.iloc[i, j]
+            if pd.notna(v) and abs(v) >= threshold:
+                pairs.append((corr.columns[i], corr.columns[j], float(v)))
+    pairs.sort(key=lambda x: -abs(x[2]))
+    if not pairs:
+        return f"No correlations above |{threshold}|."
+    return "\n".join(f"{a} <-> {b}: {v:+.2f}" for a, b, v in pairs[:20])
+
+
+# ============================================================================
+# UI helper
+# ============================================================================
+def quick_prompts_for_dataset() -> List[str]:
+    """Generate dataset-aware quick prompts using the actual columns."""
+    if _df is None or _profile_cache is None:
+        return []
+    classes = _profile_cache["classes"]
+    prompts: List[str] = ["Give me an overview of this dataset"]
+
+    num_cols = classes["numeric"][:2]
+    cat_cols = classes["categorical"][:2]
+    date_cols = classes["datetime"][:1]
+
+    if num_cols and cat_cols:
+        prompts.append(f"Top {cat_cols[0]} by {num_cols[0]}")
+    if num_cols:
+        prompts.append(f"What's the distribution of {num_cols[0]}?")
+    if date_cols and num_cols:
+        prompts.append(f"How does {num_cols[0]} change over time?")
+    if cat_cols:
+        prompts.append(f"Breakdown of {cat_cols[0]}")
+    if len(num_cols) >= 2:
+        prompts.append(f"Is there a relationship between {num_cols[0]} and {num_cols[1]}?")
+    prompts.append("What looks unusual or worth investigating?")
+    return prompts[:6]
