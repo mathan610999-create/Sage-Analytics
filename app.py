@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -196,8 +197,13 @@ html, body, [class*="css"] {{
     animation: fadeUp 0.5s ease;
 }}
 .empty-icon {{
-    font-size: 2.8rem; margin-bottom: 0.9rem;
-    display: block; line-height: 1;
+    font-size: 3rem; margin-bottom: 1rem;
+    display: flex; align-items: center; justify-content: center;
+    width: 72px; height: 72px; border-radius: 20px;
+    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
+    color: white; margin: 0 auto 1.2rem;
+    box-shadow: 0 8px 24px rgba(34,160,90,0.3);
+    font-size: 2rem; line-height: 1;
 }}
 .empty-title {{
     font-family: 'Fraunces', serif; font-size: 1.5rem;
@@ -217,15 +223,34 @@ section[data-testid="stSidebar"] .block-container {{
 section[data-testid="stSidebar"] * {{
     color: rgba(255,255,255,0.85) !important;
 }}
+/* File uploader — dark sidebar */
 section[data-testid="stSidebar"] [data-testid="stFileUploader"] {{
     background: rgba(255,255,255,0.05) !important;
-    border: 1.5px dashed rgba(255,255,255,0.15) !important;
     border-radius: 12px !important;
 }}
-section[data-testid="stSidebar"] [data-testid="stFileUploader"]:hover {{
-    border-color: {ACCENT_VIVID} !important;
-    background: rgba(34,160,90,0.08) !important;
+section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] {{
+    background: rgba(255,255,255,0.05) !important;
+    border: 1.5px dashed rgba(255,255,255,0.18) !important;
+    border-radius: 12px !important;
+    transition: all 0.2s ease !important;
 }}
+section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"]:hover {{
+    border-color: {ACCENT_VIVID} !important;
+    background: rgba(34,160,90,0.1) !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] * {{
+    color: rgba(255,255,255,0.65) !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] svg {{
+    fill: rgba(255,255,255,0.4) !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stFileUploaderFileName"] {{
+    background: rgba(34,160,90,0.15) !important;
+    border: 1px solid rgba(34,160,90,0.3) !important;
+    border-radius: 8px !important;
+    color: #7ddba0 !important;
+}}
+/* Selectbox dark */
 section[data-testid="stSidebar"] .stSelectbox > div > div {{
     background: rgba(255,255,255,0.07) !important;
     border: 1px solid rgba(255,255,255,0.12) !important;
@@ -234,6 +259,9 @@ section[data-testid="stSidebar"] .stSelectbox > div > div {{
 }}
 section[data-testid="stSidebar"] .stSelectbox > div > div:hover {{
     border-color: {ACCENT_VIVID} !important;
+}}
+section[data-testid="stSidebar"] .stSelectbox svg {{
+    fill: rgba(255,255,255,0.5) !important;
 }}
 .sidebar-h {{
     font-size: 0.65rem; color: rgba(255,255,255,0.35) !important;
@@ -429,11 +457,171 @@ hr {{ border: none; border-top: 1px solid {LINE}; margin: 1.2rem 0; }}
 .stSuccess {{ border-radius: 10px !important; }}
 .stError {{ border-radius: 10px !important; }}
 
+/* ── Main page file uploader (landing) ── */
+.upload-zone [data-testid="stFileUploadDropzone"] {{
+    background: {ACCENT_SOFT} !important;
+    border: 2px dashed rgba(34,160,90,0.35) !important;
+    border-radius: 14px !important;
+    padding: 1.5rem !important;
+    transition: all 0.2s ease !important;
+}}
+.upload-zone [data-testid="stFileUploadDropzone"]:hover {{
+    background: rgba(34,160,90,0.12) !important;
+    border-color: {ACCENT_VIVID} !important;
+}}
+.upload-zone [data-testid="stFileUploadDropzone"] * {{
+    color: {ACCENT} !important;
+}}
+.upload-zone [data-testid="stFileUploadDropzone"] svg {{
+    fill: {ACCENT} !important;
+}}
+/* Sample dataset button — centred subtle link style */
+.upload-zone .stButton > button {{
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: {MUTED} !important;
+    font-size: 0.82rem !important;
+    text-decoration: underline !important;
+    padding: 0 !important;
+    width: auto !important;
+}}
+.upload-zone .stButton > button:hover {{
+    color: {ACCENT} !important;
+    background: transparent !important;
+    transform: none !important;
+    box-shadow: none !important;
+}}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {{ width: 5px; height: 5px; }}
 ::-webkit-scrollbar-track {{ background: transparent; }}
 ::-webkit-scrollbar-thumb {{ background: {LINE}; border-radius: 999px; }}
 ::-webkit-scrollbar-thumb:hover {{ background: #c5cfc4; }}
+
+/* ── Native markdown styled as agent bubble ── */
+.bubble-meta.agent + div[data-testid="stMarkdownContainer"] {{
+    background: {CARD_BG};
+    border: 1px solid {LINE};
+    border-radius: 0 18px 18px 18px;
+    padding: 1rem 1.25rem;
+    margin: 0 20% 0.8rem 0;
+    box-shadow: {SHADOW_SM};
+    font-size: 0.91rem;
+    line-height: 1.75;
+    animation: fadeUp 0.35s ease;
+}}
+.bubble-meta.agent + div[data-testid="stMarkdownContainer"] strong {{
+    color: {ACCENT};
+}}
+.bubble-meta.agent + div[data-testid="stMarkdownContainer"] p {{
+    margin: 0.3rem 0;
+}}
+.bubble-meta.agent + div[data-testid="stMarkdownContainer"] ul {{
+    margin: 0.3rem 0; padding-left: 1.2rem;
+}}
+.bubble-meta.agent + div[data-testid="stMarkdownContainer"] li {{
+    margin: 0.2rem 0;
+}}
+
+/* ── Starter prompt buttons (chat empty state) ── */
+div[data-testid="stHorizontalBlock"] .stButton > button {{
+    background: {CARD_BG} !important;
+    border: 1px solid {LINE} !important;
+    border-radius: 12px !important;
+    font-size: 0.84rem !important;
+    color: {INK} !important;
+    text-align: left !important;
+    padding: 0.7rem 1rem !important;
+    height: auto !important;
+    white-space: normal !important;
+    line-height: 1.4 !important;
+    box-shadow: {SHADOW_SM} !important;
+    transition: all 0.2s ease !important;
+}}
+div[data-testid="stHorizontalBlock"] .stButton > button:hover {{
+    border-color: {ACCENT_VIVID} !important;
+    background: {ACCENT_SOFT} !important;
+    color: {ACCENT} !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px {ACCENT_GLOW} !important;
+}}
+
+/* ── KPI card accent colours by index ── */
+.kpi:nth-child(1)::before {{ background: linear-gradient(90deg, #1a5c35, #22a05a); }}
+.kpi:nth-child(2)::before {{ background: linear-gradient(90deg, #b8873a, #e0b870); }}
+.kpi:nth-child(3)::before {{ background: linear-gradient(90deg, #2563eb, #60a5fa); }}
+.kpi:nth-child(4)::before {{ background: linear-gradient(90deg, #7c3aed, #a78bfa); }}
+.kpi:nth-child(5)::before {{ background: linear-gradient(90deg, #dc2626, #f87171); }}
+.kpi:nth-child(6)::before {{ background: linear-gradient(90deg, #0891b2, #67e8f9); }}
+
+/* ── Topbar pill polish ── */
+.topbar-meta {{
+    animation: fadeIn 0.6s ease 0.2s both;
+}}
+
+/* ── Page background texture ── */
+.main .block-container {{
+    background: {PAGE_BG};
+}}
+
+/* ── Chat input ── */
+[data-testid="stChatInput"] textarea {{
+    border-radius: 14px !important;
+    border: 1.5px solid {LINE} !important;
+    font-size: 0.92rem !important;
+    padding: 0.75rem 1rem !important;
+    transition: border-color 0.2s ease !important;
+    background: {CARD_BG} !important;
+}}
+[data-testid="stChatInput"] textarea:focus {{
+    border-color: {ACCENT_VIVID} !important;
+    box-shadow: 0 0 0 3px {ACCENT_GLOW} !important;
+}}
+
+/* ── Expander (tool trace) ── */
+details summary {{
+    border-radius: 10px !important;
+    padding: 0.45rem 0.8rem !important;
+    font-size: 0.8rem !important;
+    background: #f4f7f4 !important;
+    border: 1px solid {LINE} !important;
+    cursor: pointer !important;
+    user-select: none !important;
+    transition: background 0.15s !important;
+}}
+details summary:hover {{ background: {ACCENT_SOFT} !important; }}
+details[open] summary {{ border-radius: 10px 10px 0 0 !important; }}
+
+/* ── Dataframe table ── */
+[data-testid="stDataFrame"] {{
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    border: 1px solid {LINE} !important;
+    box-shadow: {SHADOW_SM} !important;
+}}
+
+/* ── Success/info alerts ── */
+[data-testid="stAlert"] {{
+    border-radius: 12px !important;
+    border: none !important;
+}}
+
+/* ── Follow-up buttons ── */
+.follow-label + div .stButton > button {{
+    background: {CARD_BG} !important;
+    border: 1px solid {LINE} !important;
+    border-radius: 20px !important;
+    font-size: 0.8rem !important;
+    padding: 0.4rem 0.85rem !important;
+    color: {MUTED} !important;
+    font-weight: 500 !important;
+}}
+.follow-label + div .stButton > button:hover {{
+    border-color: {ACCENT} !important;
+    color: {ACCENT} !important;
+    background: {ACCENT_SOFT} !important;
+}}
 </style>
 """,
     unsafe_allow_html=True,
@@ -707,22 +895,136 @@ render_topbar()
 # Empty state
 # ─────────────────────────────────────────────────────────────────────────────
 if not st.session_state.data_loaded:
-    st.markdown(
-        f"""
-        <div class="empty">
-          <span class="empty-icon">🌿</span>
-          <div class="empty-title">Drop in any spreadsheet to begin</div>
-          <div class="empty-desc">Upload a CSV or Excel file — Sage automatically detects column types, builds your dashboard, and lets you explore everything in plain English. Sales, finance, HR, surveys, sensors — anything tabular.</div>
-          <div style="margin-top:1.4rem;display:flex;justify-content:center;gap:0.5rem;flex-wrap:wrap">
-            <span class="chip">📈 Sales analysis</span>
-            <span class="chip">📊 Trend tracking</span>
-            <span class="chip">🔍 Segment breakdown</span>
-            <span class="chip">🤖 AI chat</span>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # ── Hero section ──────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <style>
+    /* Landing page layout */
+    .landing-hero {{
+        text-align: center;
+        padding: 3rem 1rem 2rem;
+        animation: fadeUp 0.5s ease;
+    }}
+    .landing-icon {{
+        width: 80px; height: 80px; border-radius: 22px;
+        background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
+        display: flex; align-items: center; justify-content: center;
+        margin: 0 auto 1.4rem;
+        font-size: 2.2rem; line-height: 1;
+        box-shadow: 0 12px 32px rgba(34,160,90,0.35);
+    }}
+    .landing-title {{
+        font-family: 'Fraunces', serif;
+        font-size: 2.6rem; font-weight: 700;
+        color: {INK}; letter-spacing: -0.03em;
+        line-height: 1.1; margin-bottom: 0.75rem;
+    }}
+    .landing-sub {{
+        font-size: 1rem; color: {MUTED};
+        line-height: 1.65; max-width: 480px;
+        margin: 0 auto 2rem;
+    }}
+    .upload-zone {{
+        background: {CARD_BG};
+        border: 2px dashed {LINE};
+        border-radius: 20px;
+        padding: 2.2rem 2rem;
+        max-width: 560px;
+        margin: 0 auto;
+        box-shadow: {SHADOW_MD};
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }}
+    .upload-zone:hover {{
+        border-color: {ACCENT_VIVID};
+        box-shadow: 0 8px 32px rgba(34,160,90,0.12);
+    }}
+    .upload-label {{
+        font-size: 0.75rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.1em;
+        color: {MUTED}; margin-bottom: 0.6rem;
+    }}
+    .feature-row {{
+        display: flex; justify-content: center;
+        gap: 1.5rem; margin-top: 2.5rem; flex-wrap: wrap;
+    }}
+    .feature-item {{
+        display: flex; align-items: center; gap: 0.45rem;
+        font-size: 0.82rem; color: {MUTED}; font-weight: 500;
+    }}
+    .feature-dot {{
+        width: 6px; height: 6px; border-radius: 50%;
+        background: {ACCENT_VIVID}; flex-shrink: 0;
+    }}
+    </style>
+
+    <div class="landing-hero">
+      <div class="landing-icon">🌿</div>
+      <div class="landing-title">Wise advice from<br>any dataset</div>
+      <div class="landing-sub">Upload a spreadsheet and Sage instantly builds your dashboard, profiles your data, and answers questions like a senior analyst — with real numbers and clear recommendations.</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Upload zone (centred, prominent) ──────────────────────────────────────
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        st.markdown('<div class="upload-zone">', unsafe_allow_html=True)
+        st.markdown('<div class="upload-label">Upload your data</div>', unsafe_allow_html=True)
+        uploaded_main = st.file_uploader(
+            "Drop a CSV or Excel file here, or click to browse",
+            type=["csv", "xlsx", "xls"],
+            label_visibility="collapsed",
+            key="main_uploader",
+        )
+        st.markdown(
+            f'<div style="text-align:center;margin-top:0.6rem;font-size:0.77rem;color:{MUTED}">'
+            f'CSV · XLSX · XLS &nbsp;·&nbsp; Up to 200 MB</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if uploaded_main is not None:
+            try:
+                if uploaded_main.name.lower().endswith(".csv"):
+                    df_up = pd.read_csv(uploaded_main)
+                else:
+                    df_up = smart_read_excel(uploaded_main)
+                changes = load_dataframe(df_up, dataset_name=uploaded_main.name)
+                st.session_state.data_loaded = True
+                st.session_state.df_name = uploaded_main.name
+                st.session_state.messages = []
+                st.session_state.thread_id = str(uuid.uuid4())
+                st.session_state.data_changes = changes
+                st.session_state.agent = build_agent()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not read file: {e}")
+
+        # Sample dataset shortcut
+        sample_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_sales_data.csv")
+        if os.path.exists(sample_path):
+            st.markdown('<div style="text-align:center;margin-top:0.9rem">', unsafe_allow_html=True)
+            if st.button("⚡  Try with sample dataset instead", key="load_sample_main"):
+                df_s = pd.read_csv(sample_path)
+                changes = load_dataframe(df_s, dataset_name="sample_sales_data.csv")
+                st.session_state.data_loaded = True
+                st.session_state.df_name = "sample_sales_data.csv"
+                st.session_state.messages = []
+                st.session_state.thread_id = str(uuid.uuid4())
+                st.session_state.data_changes = changes
+                st.session_state.agent = build_agent()
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Feature pills ──────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div class="feature-row">
+      <div class="feature-item"><div class="feature-dot"></div> Auto dashboard</div>
+      <div class="feature-item"><div class="feature-dot"></div> AI analyst chat</div>
+      <div class="feature-item"><div class="feature-dot"></div> Trend & breakdown charts</div>
+      <div class="feature-item"><div class="feature-dot"></div> Plain-English insights</div>
+      <div class="feature-item"><div class="feature-dot"></div> Smart recommendations</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.stop()
 
 
@@ -1016,6 +1318,36 @@ def run_agent_with_trace(question: str) -> Dict[str, Any]:
     return {"content": final_text, "trace": trace, "charts": charts}
 
 
+def _parse_row_count(tool_name: str, result: str) -> Optional[int]:
+    if not result:
+        return None
+    try:
+        data = json.loads(result)
+        if isinstance(data, dict):
+            if "outlier_count" in data:
+                return int(data["outlier_count"])
+            if "rows" in data:
+                return int(data["rows"])
+        return None
+    except Exception:
+        pass
+    lines = [l for l in result.strip().split("\n") if l.strip()]
+    return max(0, len(lines) - 1) if len(lines) > 1 else None
+
+
+def _extract_key_finding(content: str) -> str:
+    m = re.search(r"(?:🔍[^\n]*Key Finding|Key Finding[^\n]*🔍)[^\n]*\n+(.+?)(?:\n|$)", content, re.IGNORECASE)
+    if m:
+        line = re.sub(r"\*+", "", m.group(1)).strip()
+        if len(line) > 20:
+            return line
+    for line in content.split("\n"):
+        clean = re.sub(r"\*+|#+|^[-•]\s*", "", line).strip()
+        if clean and len(clean) > 30 and not any(clean.startswith(e) for e in ["🔍", "📊", "⚡", "🎯", "💬"]):
+            return clean
+    return ""
+
+
 def _render_message(msg: Dict[str, Any]) -> None:
     if msg["role"] == "user":
         st.markdown(
@@ -1032,22 +1364,51 @@ def _render_message(msg: Dict[str, Any]) -> None:
     if trace:
         with st.expander(f"⚙️  Sage ran {len(trace)} tool call{'s' if len(trace)!=1 else ''}", expanded=False):
             for step in trace:
-                args_str = ", ".join(f"{k}={v!r}" for k, v in (step.get("args") or {}).items())
+                tool_name = step["tool"]
+                args = step.get("args") or {}
+                result = step.get("result", "")
+                row_count = _parse_row_count(tool_name, result)
+                count_badge = f"  ·  {row_count} rows" if row_count is not None and row_count > 0 else ""
                 st.markdown(
-                    f"<div class='tool-trace'><b>{step['tool']}</b>({args_str})</div>",
+                    f"<div class='tool-trace'><b>{tool_name}</b>{count_badge}</div>",
                     unsafe_allow_html=True,
                 )
-                if step.get("result"):
-                    st.code(step["result"][:600], language="text")
+                if tool_name == "run_sql" and args.get("query"):
+                    st.code(args["query"], language="sql")
+                if result:
+                    st.code(result[:600], language="text")
 
-    body = (msg.get("content") or "").replace("\n", "<br>")
+    # Render label then body; use st.markdown for native markdown rendering
     st.markdown(
-        f"""<div class="bubble-agent">
-            <div class="bubble-meta agent">🌿 Sage</div>
-            {body}
-        </div>""",
+        f'<div class="bubble-meta agent" style="margin:0.6rem 0 0.2rem">🌿 Sage · Analyst</div>',
         unsafe_allow_html=True,
     )
+    content = msg.get("content") or ""
+    # Render as native Streamlit markdown so **bold**, bullets, headers all work
+    st.markdown(content)
+
+    # One-sentence plain-English interpretation
+    interp = _extract_key_finding(content)
+    if interp:
+        st.markdown(
+            f'<div style="font-size:0.82rem;color:{MUTED};font-style:italic;'
+            f'margin:0.3rem 0 0.6rem;padding:0.5rem 0.75rem;'
+            f'border-left:3px solid {ACCENT_VIVID};background:{ACCENT_SOFT};'
+            f'border-radius:0 8px 8px 0;">{interp}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Anomaly detect warning
+    for step in trace:
+        if step["tool"] == "anomaly_detect" and step.get("result"):
+            try:
+                data = json.loads(step["result"])
+                count = data.get("outlier_count", 0)
+                if count > 0:
+                    col_name = data.get("column", "column")
+                    st.warning(f"⚠️  {count} outlier{'s' if count != 1 else ''} detected in **{col_name}** (IQR method).")
+            except Exception:
+                pass
 
     # Inline charts inside a card
     for fig in msg.get("charts") or []:
@@ -1104,16 +1465,28 @@ with tab_chat:
     with messages_area:
         if not st.session_state.messages:
             prompts = quick_prompts_for_dataset()
-            chip_html = "".join(f'<span class="chip">{p}</span>' for p in prompts[:5])
             st.markdown(
-                f"""<div class="empty" style="padding:2.8rem 2rem">
-                    <span class="empty-icon">💬</span>
-                    <div class="empty-title">Start a conversation</div>
-                    <div class="empty-desc">Ask anything about your data in plain English. Here are some ideas to get you started:</div>
-                    <div style="margin-top:1.1rem;line-height:2.2">{chip_html}</div>
+                f"""<div class="empty" style="padding:2.8rem 2rem 1.8rem">
+                    <span class="empty-icon">✦</span>
+                    <div class="empty-title">What do you want to know?</div>
+                    <div class="empty-desc">Ask anything about your data — Sage will analyse it and respond like a senior analyst, with real numbers and clear recommendations.</div>
                 </div>""",
                 unsafe_allow_html=True,
             )
+            if prompts:
+                st.markdown(
+                    f'<div style="font-size:0.7rem;color:{MUTED};text-transform:uppercase;'
+                    f'letter-spacing:0.1em;font-weight:700;margin:0.5rem 0 0.6rem;text-align:center">'
+                    f'Try one of these</div>',
+                    unsafe_allow_html=True,
+                )
+                # Render as actual clickable buttons in a grid
+                btn_cols = st.columns(min(len(prompts[:4]), 2))
+                for qi, prompt_text in enumerate(prompts[:4]):
+                    with btn_cols[qi % 2]:
+                        if st.button(prompt_text, key=f"starter_{qi}"):
+                            st.session_state.pending_question = prompt_text
+                            st.rerun()
 
         for i, msg in enumerate(st.session_state.messages):
             _render_message(msg)

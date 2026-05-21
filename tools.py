@@ -120,7 +120,18 @@ def clean_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
 # ============================================================================
 # Column classification
 # ============================================================================
-_ID_NAME_RE = re.compile(r"(?:^|_)(id|code|key|uuid|guid|sku)(?:$|_)", re.I)
+_ID_NAME_RE = re.compile(
+    r"(?:^|[_\-\s])(id|code|key|uuid|guid|sku)($|[_\-\s])"  # snake_case: customer_id
+    r"|ID$"                                                     # camelCase suffix: CustomerID
+    r"|^(id|code|key)$",                                       # bare: 'id', 'code', 'key'
+    re.I
+)
+
+_NAME_COL_RE = re.compile(
+    r"(first|last|full|middle|given|sur|family)?[_\-\s]?name"
+    r"|salutation|prefix|suffix|title",
+    re.I
+)
 
 
 def _looks_like_sequence(s: pd.Series) -> bool:
@@ -160,7 +171,8 @@ def _classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
                 out["numeric"].append(col)
         else:
             unique_ratio = s.nunique(dropna=True) / n
-            if unique_ratio > 0.6 and n > 30:
+            name_col = bool(_NAME_COL_RE.search(str(col)))
+            if name_col or (unique_ratio > 0.6 and n > 30):
                 out["text"].append(col)
             else:
                 out["categorical"].append(col)
@@ -172,6 +184,9 @@ def build_profile(df: pd.DataFrame) -> Dict[str, Any]:
 
     numeric_summary: Dict[str, Any] = {}
     for col in classes["numeric"]:
+        # Skip ID-like columns — summing/averaging them is meaningless
+        if col in classes.get("id", []):
+            continue
         s = pd.to_numeric(df[col], errors="coerce").dropna()
         if len(s) == 0:
             continue
@@ -378,6 +393,40 @@ def correlations(threshold: float = 0.5) -> str:
     return "\n".join(f"{a} <-> {b}: {v:+.2f}" for a, b, v in pairs[:20])
 
 
+@tool
+def anomaly_detect(column: str) -> str:
+    """Detect outliers in a numeric column using the IQR method (Q1 - 1.5×IQR, Q3 + 1.5×IQR).
+    Use for 'anything unusual', 'outliers', 'spikes', 'what looks off'."""
+    if _df is None:
+        return "No data loaded yet."
+    if column not in _df.columns:
+        return f"Column '{column}' not found. Available: {list(_df.columns)}"
+    s = pd.to_numeric(_df[column], errors="coerce").dropna()
+    if s.empty:
+        return f"Column '{column}' has no numeric values."
+    q1, q3 = float(s.quantile(0.25)), float(s.quantile(0.75))
+    iqr = q3 - q1
+    lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    col_numeric = pd.to_numeric(_df[column], errors="coerce")
+    mask = col_numeric.lt(lower) | col_numeric.gt(upper)
+    outliers = _df[mask]
+    count = int(len(outliers))
+    if count == 0:
+        return json.dumps({
+            "column": column, "outlier_count": 0,
+            "bounds": {"lower": round(lower, 4), "upper": round(upper, 4)},
+            "message": "No outliers found.",
+        })
+    return json.dumps({
+        "column": column,
+        "outlier_count": count,
+        "bounds": {"lower": round(lower, 4), "upper": round(upper, 4)},
+        "outlier_rows": json.loads(
+            outliers.head(20).to_json(orient="records", default_handler=str)
+        ),
+    }, indent=2, default=str)
+
+
 # ============================================================================
 # UI helper
 # ============================================================================
@@ -388,7 +437,9 @@ def quick_prompts_for_dataset() -> List[str]:
     classes = _profile_cache["classes"]
     prompts: List[str] = ["Give me an overview of this dataset"]
 
-    num_cols = classes["numeric"][:2]
+    # Exclude ID columns from metric suggestions
+    id_cols = set(classes.get("id", []))
+    num_cols = [c for c in classes["numeric"] if c not in id_cols][:2]
     cat_cols = classes["categorical"][:2]
     date_cols = classes["datetime"][:1]
 
