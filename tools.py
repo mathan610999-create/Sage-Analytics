@@ -31,15 +31,29 @@ _dataset_name: Optional[str] = None
 # Smart Excel reader — auto-detect header row
 # ============================================================================
 def smart_read_excel(file_buffer) -> pd.DataFrame:
-    """Read an Excel file, auto-detecting the actual header row."""
-    raw = pd.read_excel(file_buffer, header=None)
+    """Read an Excel file, auto-detecting the actual header row.
+    Scans first 20 rows, picks the row with the most non-null text cells
+    that is immediately followed by a data row with numeric values.
+    """
+    raw = pd.read_excel(file_buffer, header=None, nrows=20)
     header_row = 0
-    for i in range(min(10, len(raw))):
+    best_score = -1
+    for i in range(len(raw) - 1):
         row = raw.iloc[i].astype(str).str.strip()
-        non_null = (row.str.lower() != "nan").sum()
-        if non_null >= max(3, len(raw.columns) * 0.5):
+        next_row = raw.iloc[i + 1].astype(str).str.strip()
+        # Score = text cells in this row + numeric cells in next row
+        text_count = (
+            (row.str.lower() != "nan") &
+            (pd.to_numeric(row, errors="coerce").isna())
+        ).sum()
+        next_numeric = pd.to_numeric(
+            next_row.str.replace(r"[\$,€£¥%\s]", "", regex=True),
+            errors="coerce"
+        ).notna().sum()
+        score = text_count * 2 + next_numeric
+        if score > best_score:
+            best_score = score
             header_row = i
-            break
     file_buffer.seek(0)
     df = pd.read_excel(file_buffer, header=header_row)
     return df.dropna(axis=1, how="all").dropna(axis=0, how="all")
@@ -353,9 +367,9 @@ def top_n(group_by: str, metric: str, n: int = 5, ascending: bool = False) -> st
 
 
 @tool
-def time_series(date_column: str, metric: str, freq: str = "M") -> str:
+def time_series(date_column: str, metric: str, freq: str = "ME") -> str:
     """Aggregate `metric` over time using `date_column`.
-    freq: D=day, W=week, M=month, Q=quarter, Y=year."""
+    freq: D=day, W=week, ME=month-end, Q=quarter, Y=year."""
     if _df is None:
         return "No data loaded yet."
     if date_column not in _df.columns:

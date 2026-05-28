@@ -22,6 +22,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
+# audiorecorder replaced with st.audio_input
+from voice import transcribe_audio, speak, autoplay_audio, speak_thinking
 
 from agent import build_agent
 from tools import (
@@ -640,6 +642,8 @@ def _init_state() -> None:
         "df_name": None,
         "data_changes": [],
         "pending_question": None,
+        "voice_mode": False,
+        "pending_audio": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1449,7 +1453,50 @@ with tab_chat:
         })
 
     messages_area = st.container()
+
+    # Voice + text input row
     user_input = st.chat_input("Ask Sage about your data…")
+
+    # Voice input using native Streamlit audio input
+    with st.expander("🎤 Speak your question", expanded=False):
+        audio_value = st.audio_input("Click to record your question", key="voice_recorder")
+        if audio_value is not None:
+            audio_bytes = audio_value.read()
+            audio_hash = hash(audio_bytes)
+            if audio_hash != st.session_state.get("_last_audio_hash"):
+                st.session_state["_last_audio_hash"] = audio_hash
+                with st.spinner("Sage is listening..."):
+                    transcript = transcribe_audio(audio_bytes)
+                st.write(f"DEBUG transcript: {transcript}")
+                if transcript and not transcript.startswith("Transcription error"):
+                    st.info(f'🎤 You said: "{transcript}"')
+                    st.session_state.messages.append({"role": "user", "content": transcript})
+                    thinking_b64 = speak_thinking()
+                    if thinking_b64:
+                        st.markdown(autoplay_audio(thinking_b64), unsafe_allow_html=True)
+                    with st.spinner("Sage is thinking..."):
+                        r = run_agent_with_trace(transcript)
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": r["content"],
+                        "trace": r["trace"],
+                        "charts": r["charts"],
+                    })
+                    if r["content"]:
+                        speech_text = r["content"][:500]
+                        answer_b64 = speak(speech_text)
+                        if answer_b64:
+                            st.session_state["pending_audio"] = answer_b64
+                    st.rerun()
+
+    # Autoplay pending audio answer
+    if st.session_state.get("pending_audio"):
+        st.markdown(
+            autoplay_audio(st.session_state["pending_audio"]),
+            unsafe_allow_html=True,
+        )
+        st.session_state["pending_audio"] = None
+
     if user_input and user_input.strip():
         q = user_input.strip()
         st.session_state.messages.append({"role": "user", "content": q})
