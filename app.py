@@ -66,564 +66,359 @@ SHADOW_MD = "0 4px 24px rgba(13,26,16,0.10), 0 1px 4px rgba(13,26,16,0.06)"
 st.markdown(
     f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fraunces:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
-/* ── Reset & Base ── */
 html, body, [class*="css"] {{
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    background: {PAGE_BG};
-    color: {INK};
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    font-family: 'Inter', sans-serif;
 }}
-#MainMenu, footer, header {{ visibility: hidden; }}
-.block-container {{ padding-top: 1.6rem; padding-bottom: 4rem; max-width: 1300px; }}
 
-/* ── Keyframe Animations ── */
+/* ── Background ── */
+.stApp {{
+    background: #faf8ff;
+    background-image:
+        radial-gradient(ellipse at 10% 10%, rgba(200,168,233,0.18) 0%, transparent 50%),
+        radial-gradient(ellipse at 90% 80%, rgba(249,196,210,0.2) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 40%, rgba(175,169,236,0.1) 0%, transparent 50%);
+}}
+
+/* ── Topbar ── */
+header[data-testid="stHeader"] {{
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: blur(12px);
+    border-bottom: 0.5px solid rgba(200,168,233,0.3);
+}}
+
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {{
+    background: rgba(250,248,255,0.95);
+    border-right: 0.5px solid rgba(200,168,233,0.3);
+}}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {{
+    background: rgba(200,168,233,0.12);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+    border: none;
+}}
+.stTabs [data-baseweb="tab"] {{
+    background: transparent;
+    border-radius: 7px;
+    color: #7F77DD;
+    font-size: 13px;
+    font-weight: 400;
+    padding: 6px 16px;
+    border: none;
+}}
+.stTabs [aria-selected="true"] {{
+    background: white;
+    color: #26215C;
+    font-weight: 500;
+    box-shadow: 0 1px 4px rgba(83,74,183,0.12);
+}}
+.stTabs [data-baseweb="tab-highlight"] {{
+    display: none;
+}}
+
+/* ── KPI Cards ── */
+.kpi-card {{
+    background: rgba(255,255,255,0.8);
+    border: 0.5px solid rgba(200,168,233,0.3);
+    border-radius: 14px;
+    padding: 16px 18px;
+    backdrop-filter: blur(8px);
+}}
+.kpi-label {{
+    font-size: 10px;
+    color: #AFA9EC;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}}
+.kpi-value {{
+    font-size: 24px;
+    font-weight: 500;
+    color: #26215C;
+    margin-bottom: 3px;
+}}
+.kpi-sub {{
+    font-size: 11px;
+    color: #7F77DD;
+}}
+
+/* ── Chart Cards ── */
+.chart-card {{
+    background: rgba(255,255,255,0.8);
+    border: 0.5px solid rgba(200,168,233,0.3);
+    border-radius: 14px;
+    padding: 16px 18px;
+    backdrop-filter: blur(8px);
+    margin-bottom: 12px;
+}}
+
+/* ── Chat banner ── */
+.chat-banner {{
+    background: linear-gradient(135deg, rgba(200,168,233,0.2), rgba(249,196,210,0.2));
+    border: 0.5px solid rgba(200,168,233,0.4);
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #534AB7;
+    margin-bottom: 12px;
+}}
+
+/* ── User bubble ── */
+.bubble-user {{
+    background: linear-gradient(135deg, #7F77DD, #D4537E);
+    border-radius: 14px 14px 2px 14px;
+    padding: 10px 16px;
+    color: white;
+    font-size: 14px;
+    margin: 6px 0 6px auto;
+    max-width: 68%;
+    width: fit-content;
+}}
+
+/* ── Agent bubble ── */
+.bubble-meta {{
+    font-size: 11px;
+    color: #AFA9EC;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}}
+.bubble-agent {{
+    background: rgba(255,255,255,0.85);
+    border: 0.5px solid rgba(200,168,233,0.3);
+    border-radius: 2px 14px 14px 14px;
+    padding: 12px 16px;
+    font-size: 14px;
+    color: #26215C;
+    line-height: 1.7;
+    backdrop-filter: blur(8px);
+}}
+
+/* ── Key finding ── */
+.key-finding {{
+    background: linear-gradient(135deg, rgba(200,168,233,0.15), rgba(249,196,210,0.15));
+    border-left: 2px solid #c8a8e9;
+    border-radius: 0 6px 6px 0;
+    padding: 8px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #534AB7;
+    font-style: italic;
+}}
+
+/* ── Tool trace ── */
+.tool-trace {{
+    background: rgba(200,168,233,0.1);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: #AFA9EC;
+    margin-top: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}}
+
+/* ── Follow-up buttons ── */
+.follow-label {{
+    font-size: 10px;
+    color: #AFA9EC;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 8px 0 4px;
+}}
+
+/* ── Chat input ── */
+.stChatInput {{
+    background: rgba(255,255,255,0.85) !important;
+    border: 0.5px solid rgba(200,168,233,0.5) !important;
+    border-radius: 14px !important;
+}}
+.stChatInput textarea {{
+    color: #26215C !important;
+    font-size: 13px !important;
+}}
+
+/* ── Buttons ── */
+.stButton > button {{
+    background: rgba(255,255,255,0.7);
+    border: 0.5px solid rgba(200,168,233,0.5);
+    border-radius: 20px;
+    color: #534AB7;
+    font-size: 12px;
+    padding: 5px 14px;
+    transition: all 0.15s;
+}}
+.stButton > button:hover {{
+    background: rgba(200,168,233,0.15);
+    border-color: rgba(127,119,221,0.5);
+}}
+
+/* ── File uploader ── */
+.stFileUploader {{
+    background: rgba(255,255,255,0.7);
+    border: 1.5px dashed rgba(200,168,233,0.6);
+    border-radius: 14px;
+    padding: 8px;
+}}
+
+/* ── Expander ── */
+.streamlit-expanderHeader {{
+    background: rgba(200,168,233,0.08);
+    border-radius: 8px;
+    color: #7F77DD;
+    font-size: 12px;
+}}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {{ width: 4px; }}
+::-webkit-scrollbar-track {{ background: transparent; }}
+::-webkit-scrollbar-thumb {{ background: rgba(200,168,233,0.4); border-radius: 2px; }}
+
+/* ── Sidebar brand ── */
+.sidebar-brand {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 12px;
+}}
+.sidebar-brand-name {{
+    font-size: 16px;
+    font-weight: 500;
+    color: #26215C;
+}}
+.sidebar-brand-tag {{
+    font-size: 11px;
+    color: #AFA9EC;
+}}
+.sidebar-h {{
+    font-size: 10px;
+    color: #AFA9EC;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 12px 0 6px;
+}}
+
+/* ── Top bar dataset pill ── */
+.dataset-pill {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.7);
+    border: 0.5px solid rgba(200,168,233,0.5);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #534AB7;
+}}
+.dataset-dot {{
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #5DCAA5;
+    display: inline-block;
+}}
+
+/* ── Empty state ── */
+.empty {{
+    text-align: center;
+    padding: 40px 20px;
+}}
+.empty-icon {{
+    font-size: 32px;
+    display: block;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #7F77DD, #D4537E);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}}
+.empty-title {{
+    font-size: 22px;
+    font-weight: 500;
+    color: #26215C;
+    margin-bottom: 6px;
+}}
+.empty-desc {{
+    font-size: 13px;
+    color: #7F77DD;
+    max-width: 400px;
+    margin: 0 auto;
+}}
+
+/* ── Upload zone ── */
+.upload-zone {{
+    background: rgba(255,255,255,0.7);
+    border: 1.5px dashed rgba(200,168,233,0.6);
+    border-radius: 14px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+}}
+.upload-label {{
+    font-size: 13px;
+    color: #534AB7;
+    margin-top: 8px;
+}}
+
+/* ── Section headers ── */
+.h-section {{
+    font-size: 11px;
+    font-weight: 500;
+    color: #AFA9EC;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin: 16px 0 8px;
+}}
+
+/* ── Keyframe Animations (kept for chart cards) ── */
 @keyframes fadeUp {{
     from {{ opacity: 0; transform: translateY(12px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
 }}
-@keyframes fadeIn {{
-    from {{ opacity: 0; }}
-    to   {{ opacity: 1; }}
-}}
-@keyframes shimmer {{
-    0%   {{ background-position: -200% center; }}
-    100% {{ background-position: 200% center; }}
-}}
-@keyframes pulse-dot {{
-    0%, 100% {{ opacity: 1; transform: scale(1); }}
-    50%       {{ opacity: 0.5; transform: scale(0.75); }}
-}}
-
-/* ── Topbar ── */
-.topbar {{
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 0 1.2rem 0;
-    border-bottom: 1px solid {LINE};
-    margin-bottom: 1.6rem;
-    animation: fadeIn 0.4s ease;
-}}
-.brand {{ display: flex; align-items: center; gap: 0.75rem; }}
-.brand-mark {{
-    width: 38px; height: 38px; border-radius: 11px;
-    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
-    color: white; display: flex; align-items: center;
-    justify-content: center; font-size: 1.15rem;
-    box-shadow: 0 2px 8px rgba(34,160,90,0.35);
-}}
-.brand-name {{
-    font-family: 'Fraunces', serif; font-size: 1.4rem;
-    font-weight: 700; color: {INK}; letter-spacing: -0.02em;
-}}
-.brand-tag {{ font-size: 0.76rem; color: {MUTED}; margin-top: 1px; letter-spacing: 0.01em; }}
-.topbar-meta {{
-    display: flex; align-items: center; gap: 0.5rem;
-    background: {CARD_BG}; border: 1px solid {LINE};
-    border-radius: 999px; padding: 0.35rem 0.85rem;
-    font-size: 0.78rem; color: {MUTED};
-    box-shadow: {SHADOW_SM};
-}}
-.topbar-meta b {{ color: {ACCENT}; font-weight: 600; }}
-.topbar-dot {{
-    width: 6px; height: 6px; border-radius: 50%;
-    background: {ACCENT_VIVID};
-    display: inline-block; margin-right: 4px;
-    animation: pulse-dot 2s ease-in-out infinite;
-}}
-
-/* ── KPI Cards ── */
-.kpi {{
-    background: {CARD_BG};
-    border: 1px solid {LINE};
-    border-radius: 16px;
-    padding: 1.1rem 1.25rem 1rem;
-    position: relative; overflow: hidden;
-    box-shadow: {SHADOW_SM};
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    height: 100%;
-    animation: fadeUp 0.4s ease both;
-}}
-.kpi::before {{
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0; height: 3px;
-    background: linear-gradient(90deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
-    border-radius: 16px 16px 0 0;
-}}
-.kpi:hover {{
-    transform: translateY(-2px);
-    box-shadow: {SHADOW_MD};
-}}
-.kpi-label {{
-    font-size: 0.68rem; color: {MUTED};
-    text-transform: uppercase; letter-spacing: 0.08em;
-    font-weight: 600; margin-bottom: 0.5rem;
-}}
-.kpi-value {{
-    font-family: 'Fraunces', serif;
-    font-size: 1.7rem; font-weight: 700;
-    color: {INK}; line-height: 1; letter-spacing: -0.02em;
-}}
-.kpi-sub {{
-    font-size: 0.72rem; color: {MUTED}; margin-top: 0.45rem;
-    padding-top: 0.45rem; border-top: 1px solid {LINE};
-}}
-
-/* ── Section Headings ── */
-.h-section {{
-    display: flex; align-items: center; gap: 0.6rem;
-    font-size: 0.72rem; color: {MUTED};
-    text-transform: uppercase; letter-spacing: 0.1em;
-    font-weight: 700; margin: 2rem 0 0.9rem 0;
-}}
-.h-section::after {{
-    content: ''; flex: 1;
-    height: 1px; background: {LINE};
-}}
-
-/* ── Chart Card Wrapper ── */
-.chart-card {{
-    background: {CARD_BG}; border: 1px solid {LINE};
-    border-radius: 16px; padding: 1rem 1rem 0.5rem;
-    box-shadow: {SHADOW_SM}; margin-bottom: 0.5rem;
-    animation: fadeUp 0.5s ease both;
-}}
-
-/* ── Empty State ── */
-.empty {{
-    background: linear-gradient(135deg, {CARD_BG} 0%, #f0f6f2 100%);
-    border: 1px solid {LINE}; border-radius: 20px;
-    padding: 4rem 2.5rem; text-align: center;
-    box-shadow: {SHADOW_SM};
-    animation: fadeUp 0.5s ease;
-}}
-.empty-icon {{
-    font-size: 3rem; margin-bottom: 1rem;
-    display: flex; align-items: center; justify-content: center;
-    width: 72px; height: 72px; border-radius: 20px;
-    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
-    color: white; margin: 0 auto 1.2rem;
-    box-shadow: 0 8px 24px rgba(34,160,90,0.3);
-    font-size: 2rem; line-height: 1;
-}}
-.empty-title {{
-    font-family: 'Fraunces', serif; font-size: 1.5rem;
-    font-weight: 700; color: {INK}; margin-bottom: 0.5rem;
-    letter-spacing: -0.01em;
-}}
-.empty-desc {{ font-size: 0.9rem; color: {MUTED}; line-height: 1.6; max-width: 420px; margin: 0 auto; }}
-
-/* ── Sidebar — Dark Premium ── */
-section[data-testid="stSidebar"] {{
-    background: {SIDEBAR_BG} !important;
-    border-right: 1px solid rgba(255,255,255,0.06) !important;
-}}
-section[data-testid="stSidebar"] .block-container {{
-    padding-top: 1.6rem;
-}}
-section[data-testid="stSidebar"] * {{
-    color: rgba(255,255,255,0.85) !important;
-}}
-/* File uploader — dark sidebar */
-section[data-testid="stSidebar"] [data-testid="stFileUploader"] {{
-    background: rgba(255,255,255,0.05) !important;
-    border-radius: 12px !important;
-}}
-section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] {{
-    background: rgba(255,255,255,0.05) !important;
-    border: 1.5px dashed rgba(255,255,255,0.18) !important;
-    border-radius: 12px !important;
-    transition: all 0.2s ease !important;
-}}
-section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"]:hover {{
-    border-color: {ACCENT_VIVID} !important;
-    background: rgba(34,160,90,0.1) !important;
-}}
-section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] * {{
-    color: rgba(255,255,255,0.65) !important;
-}}
-section[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] svg {{
-    fill: rgba(255,255,255,0.4) !important;
-}}
-section[data-testid="stSidebar"] [data-testid="stFileUploaderFileName"] {{
-    background: rgba(34,160,90,0.15) !important;
-    border: 1px solid rgba(34,160,90,0.3) !important;
-    border-radius: 8px !important;
-    color: #7ddba0 !important;
-}}
-/* Selectbox dark */
-section[data-testid="stSidebar"] .stSelectbox > div > div {{
-    background: rgba(255,255,255,0.07) !important;
-    border: 1px solid rgba(255,255,255,0.12) !important;
-    border-radius: 10px !important;
-    color: rgba(255,255,255,0.9) !important;
-}}
-section[data-testid="stSidebar"] .stSelectbox > div > div:hover {{
-    border-color: {ACCENT_VIVID} !important;
-}}
-section[data-testid="stSidebar"] .stSelectbox svg {{
-    fill: rgba(255,255,255,0.5) !important;
-}}
-.sidebar-h {{
-    font-size: 0.65rem; color: rgba(255,255,255,0.35) !important;
-    text-transform: uppercase; letter-spacing: 0.12em;
-    font-weight: 700; margin: 1.3rem 0 0.5rem 0;
-}}
-.sidebar-brand {{
-    display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem;
-}}
-.sidebar-brand-mark {{
-    width: 32px; height: 32px; border-radius: 9px;
-    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
-    display: flex; align-items: center; justify-content: center; font-size: 1rem;
-    box-shadow: 0 2px 8px rgba(34,160,90,0.4);
-    flex-shrink: 0;
-}}
-.sidebar-brand-name {{
-    font-family: 'Fraunces', serif; font-size: 1.2rem;
-    font-weight: 700; color: white !important; letter-spacing: -0.01em;
-}}
-.sidebar-brand-tag {{
-    font-size: 0.75rem; color: rgba(255,255,255,0.4) !important; margin-top: 0px;
-}}
-.sidebar-dataset-card {{
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px; padding: 0.8rem 0.9rem;
-    margin-bottom: 0.3rem;
-}}
-.sidebar-dataset-name {{
-    font-size: 0.84rem; font-weight: 600;
-    color: rgba(255,255,255,0.92) !important;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}}
-.sidebar-dataset-meta {{
-    font-size: 0.72rem; color: rgba(255,255,255,0.4) !important; margin-top: 2px;
-}}
-
-/* ── Sidebar Buttons ── */
-section[data-testid="stSidebar"] .stButton > button {{
-    background: rgba(255,255,255,0.06) !important;
-    color: rgba(255,255,255,0.82) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 10px !important;
-    font-size: 0.82rem !important;
-    font-weight: 500 !important;
-    padding: 0.5rem 0.9rem !important;
-    text-align: left !important;
-    width: 100% !important;
-    transition: all 0.18s ease !important;
-    backdrop-filter: blur(4px) !important;
-}}
-section[data-testid="stSidebar"] .stButton > button:hover {{
-    background: rgba(34,160,90,0.18) !important;
-    border-color: {ACCENT_VIVID} !important;
-    color: #7ddba0 !important;
-    transform: translateX(2px) !important;
-}}
-
-/* ── Main Buttons ── */
-.stButton > button {{
-    background: {CARD_BG} !important;
-    color: {INK} !important;
-    border: 1px solid {LINE} !important;
-    border-radius: 10px !important;
-    font-size: 0.84rem !important;
-    font-weight: 500 !important;
-    padding: 0.5rem 0.9rem !important;
-    transition: all 0.18s ease !important;
-    box-shadow: {SHADOW_SM} !important;
-}}
-.stButton > button:hover {{
-    border-color: {ACCENT} !important;
-    color: {ACCENT} !important;
-    background: {ACCENT_SOFT} !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px {ACCENT_GLOW} !important;
-}}
-
-/* ── Tabs — Pill Style ── */
-.stTabs [data-baseweb="tab-list"] {{
-    background: {CARD_BG};
-    border: 1px solid {LINE}; border-radius: 12px;
-    padding: 4px; gap: 2px;
-    box-shadow: {SHADOW_SM};
-    margin-bottom: 1.2rem;
-}}
-.stTabs [data-baseweb="tab"] {{
-    background: transparent !important;
-    color: {MUTED} !important;
-    font-weight: 500 !important;
-    border-radius: 9px !important;
-    padding: 0.5rem 1.1rem !important;
-    font-size: 0.875rem !important;
-    transition: all 0.18s ease !important;
-}}
-.stTabs [data-baseweb="tab"]:hover {{
-    background: {ACCENT_SOFT} !important;
-    color: {ACCENT} !important;
-}}
-.stTabs [aria-selected="true"] {{
-    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%) !important;
-    color: white !important;
-    font-weight: 600 !important;
-    box-shadow: 0 2px 8px {ACCENT_GLOW} !important;
-}}
-
-/* ── Chat Bubbles ── */
-.bubble-user {{
-    background: linear-gradient(135deg, {ACCENT} 0%, {ACCENT_VIVID} 100%);
-    border-radius: 18px 18px 4px 18px;
-    padding: 0.85rem 1.15rem;
-    margin: 0.6rem 0 0.6rem 20%;
-    color: white !important; font-size: 0.91rem; line-height: 1.6;
-    box-shadow: 0 4px 16px {ACCENT_GLOW};
-    animation: fadeUp 0.3s ease;
-}}
-.bubble-agent {{
-    background: {CARD_BG};
-    border: 1px solid {LINE};
-    border-radius: 18px 18px 18px 4px;
-    padding: 1rem 1.2rem;
-    margin: 0.6rem 20% 0.6rem 0;
-    color: {INK}; font-size: 0.91rem; line-height: 1.7;
-    box-shadow: {SHADOW_SM};
-    animation: fadeUp 0.3s ease;
-}}
-.bubble-meta {{
-    font-size: 0.64rem; color: rgba(255,255,255,0.7);
-    text-transform: uppercase; letter-spacing: 0.1em;
-    font-weight: 700; margin-bottom: 0.3rem;
-}}
-.bubble-meta.agent {{
-    color: {ACCENT}; font-size: 0.64rem;
-    text-transform: uppercase; letter-spacing: 0.1em;
-    font-weight: 700; margin-bottom: 0.3rem;
-    display: flex; align-items: center; gap: 0.3rem;
-}}
-
-/* ── Tool Trace ── */
-.tool-trace {{
-    font-size: 0.76rem; color: #a8c4a8;
-    background: #0d1f10; border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px; padding: 0.6rem 0.9rem;
-    margin: 0.4rem 20% 0.4rem 0;
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-    line-height: 1.5;
-}}
-.tool-trace b {{ color: {ACCENT_VIVID}; font-weight: 600; }}
-
-/* ── Chat info banner ── */
-.chat-banner {{
-    background: linear-gradient(135deg, {ACCENT_SOFT} 0%, #f0f9f4 100%);
-    border: 1px solid rgba(34,160,90,0.2);
-    border-radius: 14px; padding: 0.85rem 1.1rem;
-    margin-bottom: 1rem; font-size: 0.85rem; color: {MUTED};
-    display: flex; align-items: center; gap: 0.6rem;
-    box-shadow: {SHADOW_SM};
-}}
-.chat-banner-icon {{ font-size: 1.1rem; flex-shrink: 0; }}
-
-/* ── Chip Tags ── */
-.chip {{
-    display: inline-block; padding: 3px 11px; border-radius: 999px;
-    background: {ACCENT_SOFT}; color: {ACCENT};
-    font-size: 0.72rem; font-weight: 600; margin: 2px 3px;
-    border: 1px solid rgba(34,160,90,0.2);
-    letter-spacing: 0.01em;
-}}
-
-/* ── Follow-up suggestion pills ── */
-.follow-label {{
-    font-size: 0.65rem; color: {MUTED};
-    text-transform: uppercase; letter-spacing: 0.1em;
-    font-weight: 700; margin: 0.8rem 0 0.5rem 0;
-    display: flex; align-items: center; gap: 0.5rem;
-}}
-.follow-label::before {{
-    content: '✦'; font-size: 0.55rem; color: {GOLD};
-}}
-
-/* ── Divider ── */
-hr {{ border: none; border-top: 1px solid {LINE}; margin: 1.2rem 0; }}
-
-/* ── Expander styling ── */
-.streamlit-expanderHeader {{
-    font-size: 0.8rem !important; font-weight: 600 !important;
-    color: {MUTED} !important;
-    border-radius: 8px !important;
-}}
-
-/* ── Success/Error banners ── */
-.stSuccess {{ border-radius: 10px !important; }}
-.stError {{ border-radius: 10px !important; }}
-
-/* ── Main page file uploader (landing) ── */
-.upload-zone [data-testid="stFileUploadDropzone"] {{
-    background: {ACCENT_SOFT} !important;
-    border: 2px dashed rgba(34,160,90,0.35) !important;
-    border-radius: 14px !important;
-    padding: 1.5rem !important;
-    transition: all 0.2s ease !important;
-}}
-.upload-zone [data-testid="stFileUploadDropzone"]:hover {{
-    background: rgba(34,160,90,0.12) !important;
-    border-color: {ACCENT_VIVID} !important;
-}}
-.upload-zone [data-testid="stFileUploadDropzone"] * {{
-    color: {ACCENT} !important;
-}}
-.upload-zone [data-testid="stFileUploadDropzone"] svg {{
-    fill: {ACCENT} !important;
-}}
-/* Sample dataset button — centred subtle link style */
-.upload-zone .stButton > button {{
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    color: {MUTED} !important;
-    font-size: 0.82rem !important;
-    text-decoration: underline !important;
-    padding: 0 !important;
-    width: auto !important;
-}}
-.upload-zone .stButton > button:hover {{
-    color: {ACCENT} !important;
-    background: transparent !important;
-    transform: none !important;
-    box-shadow: none !important;
-}}
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar {{ width: 5px; height: 5px; }}
-::-webkit-scrollbar-track {{ background: transparent; }}
-::-webkit-scrollbar-thumb {{ background: {LINE}; border-radius: 999px; }}
-::-webkit-scrollbar-thumb:hover {{ background: #c5cfc4; }}
-
-/* ── Native markdown styled as agent bubble ── */
-.bubble-meta.agent + div[data-testid="stMarkdownContainer"] {{
-    background: {CARD_BG};
-    border: 1px solid {LINE};
-    border-radius: 0 18px 18px 18px;
-    padding: 1rem 1.25rem;
-    margin: 0 20% 0.8rem 0;
-    box-shadow: {SHADOW_SM};
-    font-size: 0.91rem;
-    line-height: 1.75;
-    animation: fadeUp 0.35s ease;
-}}
-.bubble-meta.agent + div[data-testid="stMarkdownContainer"] strong {{
-    color: {ACCENT};
-}}
-.bubble-meta.agent + div[data-testid="stMarkdownContainer"] p {{
-    margin: 0.3rem 0;
-}}
-.bubble-meta.agent + div[data-testid="stMarkdownContainer"] ul {{
-    margin: 0.3rem 0; padding-left: 1.2rem;
-}}
-.bubble-meta.agent + div[data-testid="stMarkdownContainer"] li {{
-    margin: 0.2rem 0;
-}}
-
-/* ── Starter prompt buttons (chat empty state) ── */
-div[data-testid="stHorizontalBlock"] .stButton > button {{
-    background: {CARD_BG} !important;
-    border: 1px solid {LINE} !important;
-    border-radius: 12px !important;
-    font-size: 0.84rem !important;
-    color: {INK} !important;
-    text-align: left !important;
-    padding: 0.7rem 1rem !important;
-    height: auto !important;
-    white-space: normal !important;
-    line-height: 1.4 !important;
-    box-shadow: {SHADOW_SM} !important;
-    transition: all 0.2s ease !important;
-}}
-div[data-testid="stHorizontalBlock"] .stButton > button:hover {{
-    border-color: {ACCENT_VIVID} !important;
-    background: {ACCENT_SOFT} !important;
-    color: {ACCENT} !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 6px 20px {ACCENT_GLOW} !important;
-}}
-
-/* ── KPI card accent colours by index ── */
-.kpi:nth-child(1)::before {{ background: linear-gradient(90deg, #1a5c35, #22a05a); }}
-.kpi:nth-child(2)::before {{ background: linear-gradient(90deg, #b8873a, #e0b870); }}
-.kpi:nth-child(3)::before {{ background: linear-gradient(90deg, #2563eb, #60a5fa); }}
-.kpi:nth-child(4)::before {{ background: linear-gradient(90deg, #7c3aed, #a78bfa); }}
-.kpi:nth-child(5)::before {{ background: linear-gradient(90deg, #dc2626, #f87171); }}
-.kpi:nth-child(6)::before {{ background: linear-gradient(90deg, #0891b2, #67e8f9); }}
-
-/* ── Topbar pill polish ── */
-.topbar-meta {{
-    animation: fadeIn 0.6s ease 0.2s both;
-}}
-
-/* ── Page background texture ── */
-.main .block-container {{
-    background: {PAGE_BG};
-}}
-
-/* ── Chat input ── */
-[data-testid="stChatInput"] textarea {{
-    border-radius: 14px !important;
-    border: 1.5px solid {LINE} !important;
-    font-size: 0.92rem !important;
-    padding: 0.75rem 1rem !important;
-    transition: border-color 0.2s ease !important;
-    background: {CARD_BG} !important;
-}}
-[data-testid="stChatInput"] textarea:focus {{
-    border-color: {ACCENT_VIVID} !important;
-    box-shadow: 0 0 0 3px {ACCENT_GLOW} !important;
-}}
-
-/* ── Expander (tool trace) ── */
-details summary {{
-    border-radius: 10px !important;
-    padding: 0.45rem 0.8rem !important;
-    font-size: 0.8rem !important;
-    background: #f4f7f4 !important;
-    border: 1px solid {LINE} !important;
-    cursor: pointer !important;
-    user-select: none !important;
-    transition: background 0.15s !important;
-}}
-details summary:hover {{ background: {ACCENT_SOFT} !important; }}
-details[open] summary {{ border-radius: 10px 10px 0 0 !important; }}
 
 /* ── Dataframe table ── */
 [data-testid="stDataFrame"] {{
     border-radius: 14px !important;
     overflow: hidden !important;
-    border: 1px solid {LINE} !important;
-    box-shadow: {SHADOW_SM} !important;
+    border: 0.5px solid rgba(200,168,233,0.3) !important;
 }}
 
-/* ── Success/info alerts ── */
+/* ── Alerts ── */
 [data-testid="stAlert"] {{
     border-radius: 12px !important;
     border: none !important;
 }}
 
-/* ── Follow-up buttons ── */
-.follow-label + div .stButton > button {{
-    background: {CARD_BG} !important;
-    border: 1px solid {LINE} !important;
-    border-radius: 20px !important;
-    font-size: 0.8rem !important;
-    padding: 0.4rem 0.85rem !important;
-    color: {MUTED} !important;
-    font-weight: 500 !important;
+/* ── Chip Tags ── */
+.chip {{
+    display: inline-block; padding: 3px 11px; border-radius: 999px;
+    background: rgba(200,168,233,0.15); color: #534AB7;
+    font-size: 11px; font-weight: 500; margin: 2px 3px;
+    border: 0.5px solid rgba(200,168,233,0.4);
 }}
-.follow-label + div .stButton > button:hover {{
-    border-color: {ACCENT} !important;
-    color: {ACCENT} !important;
-    background: {ACCENT_SOFT} !important;
+
+/* ── Sidebar dataset card ── */
+.sidebar-dataset-card {{
+    background: rgba(200,168,233,0.08);
+    border: 0.5px solid rgba(200,168,233,0.3);
+    border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 6px;
 }}
+.sidebar-dataset-name {{
+    font-size: 13px; font-weight: 500; color: #26215C;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}}
+.sidebar-dataset-meta {{
+    font-size: 11px; color: #AFA9EC; margin-top: 2px;
+}}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -658,8 +453,8 @@ _init_state()
 # ─────────────────────────────────────────────────────────────────────────────
 # Charting helpers — dataset-agnostic
 # ─────────────────────────────────────────────────────────────────────────────
-PALETTE_BAR = ["#22a05a", "#1a5c35", "#4dc886", "#0d3d22", "#6fd99a", "#b8e8c8"]
-PALETTE_PIE = ["#1a5c35", "#22a05a", "#4dc886", "#6fd99a", "#b8e8c8", "#b8873a", "#e0b870"]
+PALETTE_BAR = ["#7F77DD", "#AFA9EC", "#534AB7", "#C8A8E9", "#D4537E", "#F9C4D2"]
+PALETTE_PIE = ["#7F77DD", "#534AB7", "#AFA9EC", "#C8A8E9", "#D4537E", "#F9C4D2", "#b8873a"]
 
 
 def _theme(fig: go.Figure, title: str = "", height: int = 280) -> go.Figure:
@@ -697,13 +492,13 @@ def chart_bar(df: pd.DataFrame, x: str, y: str, title: str = "", height: int = 3
 
 def chart_line(df: pd.DataFrame, x: str, y: str, title: str = "", height: int = 300) -> go.Figure:
     fig = px.line(df, x=x, y=y, markers=True,
-                  color_discrete_sequence=[ACCENT_VIVID])
+                  color_discrete_sequence=["#7F77DD"])
     fig.update_traces(
         line_width=2.5, marker_size=6,
-        marker_color=CARD_BG, marker_line_color=ACCENT_VIVID,
+        marker_color=CARD_BG, marker_line_color="#7F77DD",
         marker_line_width=2,
         fill="tozeroy",
-        fillcolor="rgba(34,160,90,0.08)",
+        fillcolor="rgba(127,119,221,0.08)",
     )
     return _theme(fig, title, height)
 
@@ -760,55 +555,13 @@ def render_sidebar() -> None:
               <div class="sidebar-brand-mark">🌿</div>
               <div>
                 <div class="sidebar-brand-name">Sage</div>
-                <div class="sidebar-brand-tag">Wise advice from any dataset</div>
+                <div class="sidebar-brand-tag">Every dataset has a story. Sage tells it.</div>
               </div>
             </div>
             <div style="height:1px;background:rgba(255,255,255,0.07);margin:0.9rem 0 1rem"></div>
             """,
             unsafe_allow_html=True,
         )
-
-        st.markdown('<div class="sidebar-h">Upload Data</div>', unsafe_allow_html=True)
-        uploaded = st.file_uploader(
-            "Upload CSV or Excel",
-            type=["csv", "xlsx", "xls"],
-            label_visibility="collapsed",
-        )
-
-        if uploaded is not None and uploaded.name != st.session_state.get("df_name"):
-            try:
-                if uploaded.name.lower().endswith(".csv"):
-                    df_up = pd.read_csv(uploaded)
-                else:
-                    df_up = smart_read_excel(uploaded)
-
-                changes = load_dataframe(df_up, dataset_name=uploaded.name)
-                st.session_state.data_loaded = True
-                st.session_state.df_name = uploaded.name
-                st.session_state.messages = []
-                st.session_state.thread_id = str(uuid.uuid4())
-                st.session_state.data_changes = changes
-                st.session_state.agent = build_agent()
-                st.success(f"✓  Loaded {len(df_up):,} rows")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Could not read file: {e}")
-
-        if not st.session_state.data_loaded and os.path.exists(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_sales_data.csv")
-        ):
-            if st.button("⚡  Try sample dataset", key="load_sample"):
-                df_s = pd.read_csv(
-                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_sales_data.csv")
-                )
-                changes = load_dataframe(df_s, dataset_name="sample_sales_data.csv")
-                st.session_state.data_loaded = True
-                st.session_state.df_name = "sample_sales_data.csv"
-                st.session_state.messages = []
-                st.session_state.thread_id = str(uuid.uuid4())
-                st.session_state.data_changes = changes
-                st.session_state.agent = build_agent()
-                st.rerun()
 
         if not st.session_state.data_loaded:
             return
@@ -882,7 +635,7 @@ def render_topbar() -> None:
             <div class="brand-mark">🌿</div>
             <div>
               <div class="brand-name">Sage</div>
-              <div class="brand-tag">Plain-English insights from any dataset</div>
+              <div class="brand-tag">Every dataset has a story. Sage tells it.</div>
             </div>
           </div>
           {rows_meta}
@@ -914,17 +667,17 @@ if not st.session_state.data_loaded:
         display: flex; align-items: center; justify-content: center;
         margin: 0 auto 1.4rem;
         font-size: 2.2rem; line-height: 1;
-        box-shadow: 0 12px 32px rgba(34,160,90,0.35);
+        box-shadow: 0 12px 32px rgba(34,160,90,0.25);
     }}
     .landing-title {{
         font-family: 'Fraunces', serif;
-        font-size: 2.6rem; font-weight: 700;
+        font-size: 2.8rem; font-weight: 700;
         color: {INK}; letter-spacing: -0.03em;
         line-height: 1.1; margin-bottom: 0.75rem;
     }}
     .landing-sub {{
         font-size: 1rem; color: {MUTED};
-        line-height: 1.65; max-width: 480px;
+        line-height: 1.65; max-width: 520px;
         margin: 0 auto 2rem;
     }}
     .upload-zone {{
@@ -962,8 +715,14 @@ if not st.session_state.data_loaded:
 
     <div class="landing-hero">
       <div class="landing-icon">🌿</div>
-      <div class="landing-title">Wise advice from<br>any dataset</div>
-      <div class="landing-sub">Upload a spreadsheet and Sage instantly builds your dashboard, profiles your data, and answers questions like a senior analyst — with real numbers and clear recommendations.</div>
+      <div class="landing-title">Every dataset has a story.<br>Sage tells it.</div>
+      <div class="landing-sub">Upload any CSV or Excel file. Ask questions out loud. Hear the answers spoken back with the reasoning behind them — no SQL, no dashboard, no training needed.</div>
+      <div class="feature-row">
+        <div class="feature-item"><div class="feature-dot"></div>Voice-first analytics</div>
+        <div class="feature-item"><div class="feature-dot"></div>8 reasoning tools</div>
+        <div class="feature-item"><div class="feature-dot"></div>Any dataset, instant</div>
+        <div class="feature-item"><div class="feature-dot"></div>Spoken insights</div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1055,6 +814,65 @@ classes = profile.get("classes", {}) or {}
 tab_dash, tab_chat, tab_data = st.tabs(["📊  Dashboard", "💬  Chat with Sage", "🗂  Data preview"])
 
 
+def explain_chart_with_voice(title: str, description: str) -> None:
+    """Generate and play a voice explanation for a chart."""
+    from voice import speak, autoplay_audio, _strip_markdown
+    prompt = f"In exactly 2 sentences, explain this chart called '{title}': {description}. Be specific with the key insight."
+    try:
+        agent = st.session_state.get("agent")
+        if agent:
+            config = {"configurable": {"thread_id": st.session_state.thread_id}}
+            result = agent.invoke({"messages": [{"role": "user", "content": prompt}]}, config=config)
+            msgs = result.get("messages", [])
+            text = ""
+            for msg in reversed(msgs):
+                content = str(getattr(msg, "content", ""))
+                if content and not getattr(msg, "tool_calls", None):
+                    text = content
+                    break
+            if text:
+                audio_b64 = speak(text)
+                if audio_b64:
+                    st.markdown(autoplay_audio(audio_b64), unsafe_allow_html=True)
+                    st.caption(f"🔊 {text[:120]}...")
+    except Exception as e:
+        st.error(f"Voice error: {e}")
+
+
+def _speak_chart(label: str) -> None:
+    from voice import speak, autoplay_audio
+    try:
+        agent = st.session_state.get("agent")
+        if not agent:
+            st.caption("No agent loaded yet.")
+            return
+        config = {"configurable": {"thread_id": st.session_state.get("thread_id", "default")}}
+        result = agent.invoke(
+            {"messages": [{"role": "user", "content": f"In 2 sentences, explain the key insight from this chart: {label}. Be specific with numbers from the data."}]},
+            config=config,
+        )
+        msgs = result.get("messages", [])
+        text = ""
+        for msg in reversed(msgs):
+            content = str(getattr(msg, "content", ""))
+            if content and not getattr(msg, "tool_calls", None):
+                text = content
+                break
+        if text:
+            audio = speak(text)
+            if audio:
+                st.markdown(autoplay_audio(audio), unsafe_allow_html=True)
+                st.caption(f"🔊 {text[:180]}")
+    except Exception as e:
+        st.caption(f"Voice error: {e}")
+
+
+def voice_chart_button(label: str, key: str) -> None:
+    if st.button("🔊 Explain", key=key, help="Hear Sage explain this chart"):
+        with st.spinner("Sage is thinking..."):
+            _speak_chart(label)
+
+
 # ── DASHBOARD ───────────────────────────────────────────────────────────────
 def render_dashboard(df: pd.DataFrame) -> None:
     if df.empty:
@@ -1103,14 +921,12 @@ def render_dashboard(df: pd.DataFrame) -> None:
             "sub": f"top: {df[c].mode().iloc[0] if df[c].notna().any() else '—'}",
         })
 
-    KPI_ICONS = ["◈", "◉", "◇", "◆", "○", "●"]
     cols = st.columns(min(len(kpi_targets), 6))
     for i, t in enumerate(kpi_targets[:6]):
         with cols[i]:
-            icon = KPI_ICONS[i % len(KPI_ICONS)]
             st.markdown(
-                f"""<div class="kpi" style="animation-delay:{i*0.07}s">
-                    <div class="kpi-label">{icon} &nbsp;{t['label']}</div>
+                f"""<div class="kpi-card">
+                    <div class="kpi-label">{t['label']}</div>
                     <div class="kpi-value">{t['value']}</div>
                     <div class="kpi-sub">{t['sub']}</div>
                 </div>""",
@@ -1135,6 +951,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
                 use_container_width=True,
             )
             st.markdown('</div>', unsafe_allow_html=True)
+            voice_chart_button(f"{primary_metric} over time showing monthly trends", "vc_trend")
 
     # ── Categorical breakdowns ──────────────────────────────────────────────
     breakdown_cats = [c for c in categorical_cols if df[c].nunique(dropna=True) <= 25][:4]
@@ -1163,6 +980,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
                             use_container_width=True,
                         )
                     st.markdown('</div>', unsafe_allow_html=True)
+                    voice_chart_button(f"{primary_metric} by {cat} breakdown", f"vc_1_{cat}")
 
     # ── Distributions ───────────────────────────────────────────────────────
     if numeric_cols:
@@ -1175,6 +993,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
                 st.markdown('<div class="chart-card">', unsafe_allow_html=True)
                 st.plotly_chart(chart_hist(s, f"{c} distribution"), use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
+                voice_chart_button(f"{c} distribution histogram", f"vc_2_{c}")
 
     # ── Correlations heatmap ───────────────────────────────────────────────
     nums = df.select_dtypes(include=[np.number])
@@ -1190,6 +1009,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
         st.markdown('<div class="chart-card">', unsafe_allow_html=True)
         st.plotly_chart(fig, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
+        voice_chart_button("numeric correlations heatmap showing relationships between columns", "vc_3")
 
 
 with tab_dash:
@@ -1433,7 +1253,7 @@ with tab_chat:
     st.markdown(
         f"""<div class="chat-banner">
           <span class="chat-banner-icon">✦</span>
-          <span>Ask anything in plain English — Sage profiles your data, runs analysis tools, and explains results with the actual numbers it found.</span>
+          <span>Every dataset has a story — ask Sage what yours is saying right now.</span>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -1457,37 +1277,44 @@ with tab_chat:
     # Voice + text input row
     user_input = st.chat_input("Ask Sage about your data…")
 
-    # Voice input using native Streamlit audio input
-    with st.expander("🎤 Speak your question", expanded=False):
-        audio_value = st.audio_input("Click to record your question", key="voice_recorder")
-        if audio_value is not None:
-            audio_bytes = audio_value.read()
-            audio_hash = hash(audio_bytes)
-            if audio_hash != st.session_state.get("_last_audio_hash"):
-                st.session_state["_last_audio_hash"] = audio_hash
-                with st.spinner("Sage is listening..."):
-                    transcript = transcribe_audio(audio_bytes)
-                st.write(f"DEBUG transcript: {transcript}")
-                if transcript and not transcript.startswith("Transcription error"):
-                    st.info(f'🎤 You said: "{transcript}"')
-                    st.session_state.messages.append({"role": "user", "content": transcript})
-                    thinking_b64 = speak_thinking()
-                    if thinking_b64:
-                        st.markdown(autoplay_audio(thinking_b64), unsafe_allow_html=True)
-                    with st.spinner("Sage is thinking..."):
-                        r = run_agent_with_trace(transcript)
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": r["content"],
-                        "trace": r["trace"],
-                        "charts": r["charts"],
-                    })
-                    if r["content"]:
-                        speech_text = r["content"][:500]
-                        answer_b64 = speak(speech_text)
-                        if answer_b64:
-                            st.session_state["pending_audio"] = answer_b64
-                    st.rerun()
+    st.markdown("""
+<style>
+div[data-testid="stChatInput"] > div {
+    border: 0.5px solid rgba(200,168,233,0.5) !important;
+    border-radius: 14px !important;
+    background: rgba(255,255,255,0.85) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    audio_value = st.audio_input("🎤", key="voice_recorder", label_visibility="collapsed")
+    if audio_value is not None:
+        audio_bytes = audio_value.read()
+        audio_hash = hash(audio_bytes)
+        if audio_hash != st.session_state.get("_last_audio_hash"):
+            st.session_state["_last_audio_hash"] = audio_hash
+            with st.spinner("Sage is listening..."):
+                transcript = transcribe_audio(audio_bytes)
+            if transcript and not transcript.startswith("Transcription error"):
+                st.info(f'🎤 You said: "{transcript}"')
+                st.session_state.messages.append({"role": "user", "content": transcript})
+                thinking_b64 = speak_thinking()
+                if thinking_b64:
+                    st.markdown(autoplay_audio(thinking_b64), unsafe_allow_html=True)
+                with st.spinner("Sage is thinking..."):
+                    r = run_agent_with_trace(transcript)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": r["content"],
+                    "trace": r["trace"],
+                    "charts": r["charts"],
+                })
+                if r["content"]:
+                    speech_text = r["content"][:500]
+                    answer_b64 = speak(speech_text)
+                    if answer_b64:
+                        st.session_state["pending_audio"] = answer_b64
+                st.rerun()
 
     # Autoplay pending audio answer
     if st.session_state.get("pending_audio"):
